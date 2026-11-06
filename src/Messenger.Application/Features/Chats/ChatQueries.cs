@@ -1,9 +1,7 @@
 using FluentValidation;
-using MediatR;
 using Messenger.Application.Abstractions;
 using Messenger.Application.Messaging;
 using Messenger.Domain.Chats;
-using Messenger.Domain.Common;
 
 namespace Messenger.Application.Features.Chats;
 
@@ -46,7 +44,7 @@ internal static class ChatQueries
     }
 }
 
-public sealed record ListMyChatsQuery(int Limit) : IRequest<Result<IReadOnlyList<ChatDto>>>;
+public sealed record ListMyChatsQuery(int Limit);
 
 public sealed class ListMyChatsValidator : AbstractValidator<ListMyChatsQuery>
 {
@@ -56,60 +54,12 @@ public sealed class ListMyChatsValidator : AbstractValidator<ListMyChatsQuery>
     }
 }
 
-public sealed class ListMyChatsHandler(
-    IChatStore chats,
-    IUserStore users,
-    ICurrentUser currentUser) : IRequestHandler<ListMyChatsQuery, Result<IReadOnlyList<ChatDto>>>
-{
-    public async Task<Result<IReadOnlyList<ChatDto>>> Handle(ListMyChatsQuery request, CancellationToken ct)
-    {
-        ArgumentNullException.ThrowIfNull(request);
-        if (currentUser.UserId is null)
-        {
-            return Result<IReadOnlyList<ChatDto>>.Fail(ChatAccess.Unauthenticated());
-        }
-
-        var found = await chats.ListForUserAsync(currentUser.UserId, request.Limit, ct).ConfigureAwait(false);
-        // One user batch for all chats (was: per-chat member loop → O(chats ×
-        // members) sequential lookups with cross-chat duplicates re-fetched).
-        var map = await ChatQueries.UserMapAsync(
-            users, found.SelectMany(c => c.Members.Select(m => m.UserId)), ct).ConfigureAwait(false);
-        var dtos = found.Select(c => MessagingMapping.ToDto(c, map, currentUser.UserId)).ToList();
-        return Result<IReadOnlyList<ChatDto>>.Ok(dtos);
-    }
-}
-
-public sealed record GetChatQuery(string ChatId) : IRequest<Result<ChatDto>>;
+public sealed record GetChatQuery(string ChatId);
 
 public sealed class GetChatValidator : AbstractValidator<GetChatQuery>
 {
     public GetChatValidator()
     {
         RuleFor(x => x.ChatId).NotEmpty().MaximumLength(64);
-    }
-}
-
-public sealed class GetChatHandler(
-    IChatStore chats,
-    IUserStore users,
-    ICurrentUser currentUser) : IRequestHandler<GetChatQuery, Result<ChatDto>>
-{
-    public async Task<Result<ChatDto>> Handle(GetChatQuery request, CancellationToken ct)
-    {
-        ArgumentNullException.ThrowIfNull(request);
-        if (currentUser.UserId is null)
-        {
-            return Result<ChatDto>.Fail(ChatAccess.Unauthenticated());
-        }
-
-        var chat = await chats.GetByIdAsync(request.ChatId, ct).ConfigureAwait(false);
-        var member = ChatAccess.RequireMember(chat, currentUser.UserId);
-        if (member.IsFailure)
-        {
-            return Result<ChatDto>.Fail(member.Error);
-        }
-
-        return Result<ChatDto>.Ok(
-            await ChatQueries.EnrichAsync(chats, users, member.Value!, currentUser.UserId, ct).ConfigureAwait(false));
     }
 }

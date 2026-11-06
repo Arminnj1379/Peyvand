@@ -1,6 +1,6 @@
 using Messenger.Domain.Common;
 
-namespace Messenger.Api.Endpoints;
+namespace Messenger.Api.Extensions;
 
 /// <summary>Maps domain/application errors to HTTP status codes (RFC 9457 problem details).</summary>
 public static class ResultMapper

@@ -31,23 +31,6 @@ internal sealed class FakeTokenService(DateTime now) : IAuthTokenService
     public string CreateRefreshToken() => Auth.RefreshTokens.Generate();
 }
 
-internal sealed class FakeCurrentUser : ICurrentUser
-{
-    public FakeCurrentUser(string? userId, IReadOnlyList<string>? roles = null, string? sessionId = null, string? username = null)
-    {
-        UserId = userId;
-        Roles = roles ?? [];
-        SessionId = sessionId;
-        Username = username;
-    }
-
-    public string? UserId { get; }
-    public string? Username { get; }
-    public string? SessionId { get; }
-    public bool IsAuthenticated => UserId is not null;
-    public IReadOnlyList<string> Roles { get; }
-}
-
 internal sealed class FakeUserStore : IUserStore
 {
     private readonly Dictionary<string, User> _users = [];

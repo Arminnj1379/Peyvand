@@ -3,11 +3,9 @@ using System.Security.Cryptography;
 using System.Threading.RateLimiting;
 using Microsoft.AspNetCore.RateLimiting;
 using Messenger.Api.Auth;
-using Messenger.Api.Endpoints;
 using Messenger.Api.Hubs;
 using Messenger.Api.Middleware;
-using Messenger.Application.Abstractions;
-using Messenger.Application.Behaviors;
+using Messenger.Application.Services;
 using Messenger.Infrastructure;
 using Serilog;
 
@@ -33,16 +31,15 @@ if (builder.Environment.IsDevelopment()
     Log.Warning("Generated an ephemeral development JWT signing key. Sessions will not survive restarts.");
 }
 
-// Composition root: Application (MediatR + validation) + Infrastructure (Mongo, clock, ids, auth, push).
+// Composition root: Application (services + validation) + Infrastructure (Mongo, clock, ids, auth, push).
 builder.Services.AddApplication();
 builder.Services.AddInfrastructure(builder.Configuration);
 
-// AuthN/Z: JWT bearer + role policies + per-request current user.
+// AuthN/Z: JWT bearer + role policies. Controllers build their caller from claims.
 builder.Services.AddMessengerAuthentication();
-builder.Services.AddHttpContextAccessor();
-builder.Services.AddScoped<ICurrentUser, HttpCurrentUser>();
 
 // Transport + surface.
+builder.Services.AddControllers();
 builder.Services.AddSignalR();
 // Abuse backstop (not a quota): generous per-caller fixed windows. Credential
 // endpoints take the stricter "auth" policy at the endpoint level.
@@ -147,16 +144,7 @@ if (app.Environment.IsProduction())
     }
 }
 
-app.MapSystemEndpoints();
-app.MapAuthEndpoints();
-app.MapUserEndpoints();
-app.MapAdminEndpoints();
-app.MapChatEndpoints();
-app.MapMessageEndpoints();
-app.MapFileEndpoints();
-app.MapCallEndpoints();
-app.MapNotificationEndpoints();
-app.MapSupportEndpoints();
+app.MapControllers();
 app.MapHub<MessengerHub>("/hubs/messenger");
 
 app.Run();

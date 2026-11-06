@@ -1,14 +1,12 @@
-using Messenger.Application.Abstractions;
 using Messenger.Application.Auth;
 using Messenger.Domain.Chats;
 using Messenger.Domain.Common;
 
 namespace Messenger.Application.Messaging;
 
-/// <summary>Single home of conversation authorization. Handlers never trust client ids.</summary>
+/// <summary>Single home of conversation authorization. Services never trust client ids.</summary>
 internal static class ChatAccess
 {
-    public static string? RequireCaller(ICurrentUser caller) => caller.UserId;
 
     public static Result<Chat> RequireMember(Chat? chat, string callerId)
     {

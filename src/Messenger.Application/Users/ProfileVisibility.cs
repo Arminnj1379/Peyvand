@@ -1,4 +1,5 @@
 using Messenger.Application.Abstractions;
+using Messenger.Application.Services;
 using Messenger.Domain.Users;
 
 namespace Messenger.Application.Users;
@@ -10,12 +11,12 @@ namespace Messenger.Application.Users;
 /// </summary>
 internal static class ProfileVisibility
 {
-    public static bool IsEmployee(ICurrentUser caller) =>
+    public static bool IsEmployee(CallerContext caller) =>
         caller.HasRole(nameof(Role.Employee))
         || caller.HasRole(nameof(Role.SystemAdministrator))
         || caller.HasRole(nameof(Role.OrganizationAdministrator));
 
-    public static bool CanView(ICurrentUser caller, User target) =>
+    public static bool CanView(CallerContext caller, User target) =>
         target.Id == caller.UserId || IsEmployee(caller) || target.IsEmployee;
 
     /// <summary>
@@ -23,7 +24,7 @@ internal static class ProfileVisibility
     /// (customer-to-customer visibility for people who actually talk).
     /// </summary>
     public static async Task<bool> CanViewAsync(
-        ICurrentUser caller, User target, IChatStore chats, CancellationToken ct)
+        CallerContext caller, User target, IChatStore chats, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(caller);
         ArgumentNullException.ThrowIfNull(target);

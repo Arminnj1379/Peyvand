@@ -1,8 +1,11 @@
+using FluentValidation;
 using Messenger.Application.Features.Chats;
 using Messenger.Application.Features.Messages;
 using Messenger.Application.Features.Notifications;
 using Messenger.Application.Features.Users;
 using Messenger.Application.Messaging;
+using Messenger.Application.Services;
+using Messenger.Application.Services.Implementations;
 using Messenger.Application.Support;
 using Messenger.Domain.Chats;
 using Messenger.Domain.Messages;
@@ -23,6 +26,7 @@ public sealed class ReadinessHandlerTests
         public FakeMessageStore Messages = new();
         public FakeFileStore Files = new();
         public FakeTicketStore Tickets = new();
+        public FakeAvatarStorage Avatars = new();
         public FakeClock Clock = new(Now);
         public FakeIds Ids = new();
 
@@ -35,26 +39,26 @@ public sealed class ReadinessHandlerTests
             return registered.Value!;
         }
 
-        public FakeCurrentUser As(User user, params string[] roles) =>
-            new(user.Id, roles.Length == 0 ? user.Roles.Select(r => r.ToString()).ToList() : roles.ToList());
+        public CallerContext As(User user, params string[] roles) =>
+            new CallerContext(user.Id, null, roles.Length == 0 ? user.Roles.Select(r => r.ToString()).ToList() : roles.ToList());
     }
 
     private static async Task<Chat> SeedGroupAsync(Ctx ctx, User owner, string title, params User[] members)
     {
         var ids = new List<string> { owner.Id };
         ids.AddRange(members.Select(m => m.Id));
-        var handler = new CreateGroupHandler(ctx.Chats, ctx.Users, ctx.Ids, ctx.Clock, ctx.As(owner));
-        var result = await handler.Handle(new CreateGroupCommand(title, ids, null), CancellationToken.None);
+        var conversations = new ConversationService(ctx.Chats, ctx.Users, ctx.Ids, ctx.Clock);
+        var result = await conversations.CreateGroupAsync(new CreateGroupCommand(title, ids, null), ctx.As(owner), CancellationToken.None);
         Assert.True(result.IsSuccess);
         return (await ctx.Chats.GetByIdAsync(result.Value!.Id, CancellationToken.None))!;
     }
 
     private static async Task<MessageDto> SendAsync(Ctx ctx, User sender, string chatId, string body, string clientId)
     {
-        var handler = new SendMessageHandler(
-            ctx.Chats, ctx.Messages, ctx.Files, ctx.Users, ctx.Ids, ctx.Clock, ctx.As(sender));
-        var result = await handler.Handle(
-            new SendMessageCommand(chatId, body, clientId, null), CancellationToken.None);
+        var messages = new MessageService(
+            ctx.Chats, ctx.Messages, ctx.Files, ctx.Users, ctx.Ids, ctx.Clock);
+        var result = await messages.SendMessageAsync(
+            new SendMessageCommand(chatId, body, clientId, null), ctx.As(sender), CancellationToken.None);
         Assert.True(result.IsSuccess);
         return result.Value!;
     }
@@ -73,11 +77,11 @@ public sealed class ReadinessHandlerTests
         var doomed = await SendAsync(ctx, a, mine.Id, "release notes draft", "k-2");
         await SendAsync(ctx, outsider, theirs.Id, "release the hounds", "k-3");
 
-        await new DeleteMessageHandler(ctx.Chats, ctx.Messages, ctx.Files, ctx.Users, ctx.Clock, ctx.As(a))
-            .Handle(new DeleteMessageCommand(doomed.Id), CancellationToken.None);
+        await new MessageService(ctx.Chats, ctx.Messages, ctx.Files, ctx.Users, ctx.Ids, ctx.Clock)
+            .DeleteMessageAsync(new DeleteMessageCommand(doomed.Id), ctx.As(a), CancellationToken.None);
 
-        var handler = new SearchMessagesHandler(ctx.Chats, ctx.Messages, ctx.Files, ctx.Users, ctx.As(a));
-        var result = await handler.Handle(new SearchMessagesQuery("release", 10), CancellationToken.None);
+        var messages = new MessageService(ctx.Chats, ctx.Messages, ctx.Files, ctx.Users, ctx.Ids, ctx.Clock);
+        var result = await messages.SearchMessagesAsync(new SearchMessagesQuery("release", 10), ctx.As(a), CancellationToken.None);
 
         Assert.True(result.IsSuccess);
         // Own chat only (outsider chat excluded), deleted excluded.
@@ -93,18 +97,18 @@ public sealed class ReadinessHandlerTests
         var b = await ctx.SeedUserAsync("c.bob");
         await SeedGroupAsync(ctx, a, "Release Crew", b);
 
-        var dmHandler = new CreateDmHandler(ctx.Chats, ctx.Users, ctx.Ids, ctx.Clock, ctx.As(a));
-        var dm = await dmHandler.Handle(new CreateDmCommand(b.Id), CancellationToken.None);
+        var conversations = new ConversationService(ctx.Chats, ctx.Users, ctx.Ids, ctx.Clock);
+        var dm = await conversations.CreateDmAsync(new CreateDmCommand(b.Id), ctx.As(a), CancellationToken.None);
         Assert.True(dm.IsSuccess);
 
-        var handler = new SearchMyChatsHandler(ctx.Chats, ctx.Users, ctx.As(a));
+        var searcher = new ConversationService(ctx.Chats, ctx.Users, ctx.Ids, ctx.Clock);
 
-        var byTitle = await handler.Handle(new SearchMyChatsQuery("release", 10), CancellationToken.None);
+        var byTitle = await searcher.SearchMyChatsAsync(new SearchMyChatsQuery("release", 10), ctx.As(a), CancellationToken.None);
         Assert.True(byTitle.IsSuccess);
         Assert.Single(byTitle.Value!);
         Assert.Equal("Group", byTitle.Value![0].Type);
 
-        var byPeer = await handler.Handle(new SearchMyChatsQuery("c.bob", 10), CancellationToken.None);
+        var byPeer = await searcher.SearchMyChatsAsync(new SearchMyChatsQuery("c.bob", 10), ctx.As(a), CancellationToken.None);
         Assert.True(byPeer.IsSuccess);
         Assert.Single(byPeer.Value!);
         Assert.Equal("Dm", byPeer.Value![0].Type);
@@ -116,21 +120,19 @@ public sealed class ReadinessHandlerTests
         var ctx = new Ctx();
         var a = await ctx.SeedUserAsync("set.a");
 
-        var get = await new GetMySettingsHandler(ctx.Users, ctx.As(a))
-            .Handle(new GetMySettingsQuery(), CancellationToken.None);
+        var users = new UserService(ctx.Users, ctx.Avatars, ctx.Chats, ctx.Clock);
+        var get = await users.GetMySettingsAsync(ctx.As(a), CancellationToken.None);
         Assert.True(get.IsSuccess);
         Assert.Equal("system", get.Value!.Theme);
         Assert.True(get.Value.NotificationsEnabled);
 
-        var update = await new UpdateMySettingsHandler(ctx.Users, ctx.Clock, ctx.As(a))
-            .Handle(new UpdateMySettingsCommand("dark", false), CancellationToken.None);
+        var update = await users.UpdateMySettingsAsync(new UpdateMySettingsCommand("dark", false), ctx.As(a), CancellationToken.None);
         Assert.True(update.IsSuccess);
         Assert.Equal("dark", update.Value!.Theme);
         Assert.False(update.Value.NotificationsEnabled);
 
-        var bad = await new UpdateMySettingsHandler(ctx.Users, ctx.Clock, ctx.As(a))
-            .Handle(new UpdateMySettingsCommand("neon", true), CancellationToken.None);
-        Assert.True(bad.IsFailure);
+        var bad = await Assert.ThrowsAsync<ValidationException>(() =>
+            users.UpdateMySettingsAsync(new UpdateMySettingsCommand("neon", true), ctx.As(a), CancellationToken.None));
     }
 
     [Fact]
@@ -142,8 +144,8 @@ public sealed class ReadinessHandlerTests
         var chat = await SeedGroupAsync(ctx, a, "Crew", b);
         await SendAsync(ctx, b, chat.Id, "ping", "k-1");
 
-        var result = await new ListNotificationsHandler(ctx.Chats, ctx.Users, ctx.As(a))
-            .Handle(new ListNotificationsQuery(20), CancellationToken.None);
+        var notifications = new NotificationService(ctx.Chats, ctx.Users);
+        var result = await notifications.ListNotificationsAsync(new ListNotificationsQuery(20), ctx.As(a), CancellationToken.None);
 
         Assert.True(result.IsSuccess);
         Assert.Single(result.Value!);
@@ -152,8 +154,7 @@ public sealed class ReadinessHandlerTests
         Assert.Equal("Crew", result.Value![0].Title);
 
         // Sender has nothing unread.
-        var senderView = await new ListNotificationsHandler(ctx.Chats, ctx.Users, ctx.As(b))
-            .Handle(new ListNotificationsQuery(20), CancellationToken.None);
+        var senderView = await notifications.ListNotificationsAsync(new ListNotificationsQuery(20), ctx.As(b), CancellationToken.None);
         Assert.True(senderView.IsSuccess);
         Assert.Empty(senderView.Value!);
     }
@@ -165,14 +166,14 @@ public sealed class ReadinessHandlerTests
         var customer = await ctx.SeedUserAsync("sup.customer");
         var agent = await ctx.SeedUserAsync("sup.agent", Role.SupportAgent);
 
-        var opened = await new OpenTicketHandler(ctx.Tickets, ctx.Users, ctx.Ids, ctx.Clock, ctx.As(customer))
-            .Handle(new OpenTicketCommand("Cannot log in", "App crashes"), CancellationToken.None);
+        var support = new SupportService(ctx.Tickets, ctx.Chats, ctx.Users, ctx.Ids, ctx.Clock);
+        var opened = await support.OpenTicketAsync(
+            new OpenTicketCommand("Cannot log in", "App crashes"), ctx.As(customer), CancellationToken.None);
         Assert.True(opened.IsSuccess);
         Assert.Equal("Open", opened.Value!.Status);
 
-        var assigned = await new AssignTicketHandler(
-                ctx.Tickets, ctx.Chats, ctx.Users, ctx.Ids, ctx.Clock, ctx.As(agent, "SupportAgent"))
-            .Handle(new AssignTicketCommand(opened.Value.Id, null), CancellationToken.None);
+        var assigned = await support.AssignTicketAsync(
+            new AssignTicketCommand(opened.Value.Id, null), ctx.As(agent, "SupportAgent"), CancellationToken.None);
         Assert.True(assigned.IsSuccess);
         Assert.Equal("Assigned", assigned.Value!.Status);
         Assert.Equal(agent.Id, assigned.Value.AssigneeId);
@@ -183,17 +184,17 @@ public sealed class ReadinessHandlerTests
         Assert.True(chat!.IsMember(customer.Id));
         Assert.True(chat.IsMember(agent.Id));
 
-        var progressed = await new SetTicketStatusHandler(ctx.Tickets, ctx.Users, ctx.Clock, ctx.As(agent, "SupportAgent"))
-            .Handle(new SetTicketStatusCommand(opened.Value.Id, "InProgress"), CancellationToken.None);
+        var progressed = await support.SetTicketStatusAsync(
+            new SetTicketStatusCommand(opened.Value.Id, "InProgress"), ctx.As(agent, "SupportAgent"), CancellationToken.None);
         Assert.True(progressed.IsSuccess);
 
-        var resolved = await new SetTicketStatusHandler(ctx.Tickets, ctx.Users, ctx.Clock, ctx.As(agent, "SupportAgent"))
-            .Handle(new SetTicketStatusCommand(opened.Value.Id, "Resolved"), CancellationToken.None);
+        var resolved = await support.SetTicketStatusAsync(
+            new SetTicketStatusCommand(opened.Value.Id, "Resolved"), ctx.As(agent, "SupportAgent"), CancellationToken.None);
         Assert.True(resolved.IsSuccess);
 
         // Customer closes (accepts resolution).
-        var closed = await new SetTicketStatusHandler(ctx.Tickets, ctx.Users, ctx.Clock, ctx.As(customer))
-            .Handle(new SetTicketStatusCommand(opened.Value.Id, "Closed"), CancellationToken.None);
+        var closed = await support.SetTicketStatusAsync(
+            new SetTicketStatusCommand(opened.Value.Id, "Closed"), ctx.As(customer), CancellationToken.None);
         Assert.True(closed.IsSuccess);
         Assert.NotNull(closed.Value!.ClosedAt);
     }
@@ -206,33 +207,33 @@ public sealed class ReadinessHandlerTests
         var c2 = await ctx.SeedUserAsync("iso.c2");
         var agent = await ctx.SeedUserAsync("iso.agent", Role.SupportAgent);
 
-        var t1 = await new OpenTicketHandler(ctx.Tickets, ctx.Users, ctx.Ids, ctx.Clock, ctx.As(c1))
-            .Handle(new OpenTicketCommand("Help A", null), CancellationToken.None);
-        await new OpenTicketHandler(ctx.Tickets, ctx.Users, ctx.Ids, ctx.Clock, ctx.As(c2))
-            .Handle(new OpenTicketCommand("Help B", null), CancellationToken.None);
+        var support = new SupportService(ctx.Tickets, ctx.Chats, ctx.Users, ctx.Ids, ctx.Clock);
+        var t1 = await support.OpenTicketAsync(
+            new OpenTicketCommand("Help A", null), ctx.As(c1), CancellationToken.None);
+        await support.OpenTicketAsync(
+            new OpenTicketCommand("Help B", null), ctx.As(c2), CancellationToken.None);
 
         // Customer sees only their own.
-        var mine = await new ListTicketsHandler(ctx.Tickets, ctx.Users, ctx.As(c1))
-            .Handle(new ListTicketsQuery(null, null, true, 20), CancellationToken.None);
+        var mine = await support.ListTicketsAsync(
+            new ListTicketsQuery(null, null, true, 20), ctx.As(c1), CancellationToken.None);
         Assert.True(mine.IsSuccess);
         Assert.Single(mine.Value!);
 
         // Customer cannot read another's ticket.
-        var peek = await new GetTicketHandler(ctx.Tickets, ctx.Users, ctx.As(c2))
-            .Handle(new GetTicketQuery(t1.Value!.Id), CancellationToken.None);
+        var peek = await support.GetTicketAsync(
+            new GetTicketQuery(t1.Value!.Id), ctx.As(c2), CancellationToken.None);
         Assert.True(peek.IsFailure);
         Assert.Equal(SupportErrors.Forbidden, peek.Error);
 
         // Customer cannot assign or advance work.
-        var assign = await new AssignTicketHandler(
-                ctx.Tickets, ctx.Chats, ctx.Users, ctx.Ids, ctx.Clock, ctx.As(c1))
-            .Handle(new AssignTicketCommand(t1.Value.Id, null), CancellationToken.None);
+        var assign = await support.AssignTicketAsync(
+            new AssignTicketCommand(t1.Value.Id, null), ctx.As(c1), CancellationToken.None);
         Assert.True(assign.IsFailure);
         Assert.Equal(SupportErrors.AgentOnly, assign.Error);
 
         // Agent sees the whole queue.
-        var queue = await new ListTicketsHandler(ctx.Tickets, ctx.Users, ctx.As(agent, "SupportAgent"))
-            .Handle(new ListTicketsQuery("Open", null, false, 20), CancellationToken.None);
+        var queue = await support.ListTicketsAsync(
+            new ListTicketsQuery("Open", null, false, 20), ctx.As(agent, "SupportAgent"), CancellationToken.None);
         Assert.True(queue.IsSuccess);
         Assert.Equal(2, queue.Value!.Count);
     }

@@ -1,5 +1,7 @@
 using Messenger.Application.Auth;
 using Messenger.Application.Features.Users;
+using Messenger.Application.Services;
+using Messenger.Application.Services.Implementations;
 using Messenger.Domain.Users;
 
 namespace Messenger.Application.Tests;
@@ -48,8 +50,9 @@ public sealed class UserHandlerTests
         await SeedCustomerAsync(ctx, "sara.other");
         await SeedEmployeeAsync(ctx, "sara.employee");
 
-        var handler = new SearchUsersHandler(ctx.Users, new FakeCurrentUser(customer.Id));
-        var result = await handler.Handle(new SearchUsersQuery("sara", 10), CancellationToken.None);
+        var handler = new UserService(ctx.Users, ctx.Avatars, ctx.Chats, ctx.Clock);
+        var result = await handler.SearchUsersAsync(
+            new SearchUsersQuery("sara", 10), new CallerContext(customer.Id, null, []), CancellationToken.None);
 
         Assert.True(result.IsSuccess);
         Assert.DoesNotContain(result.Value!, u => u.UserType == "Customer" && u.Id != customer.Id);
@@ -63,8 +66,9 @@ public sealed class UserHandlerTests
         var customer = await SeedCustomerAsync(ctx);
         var other = await SeedCustomerAsync(ctx, "other.c");
 
-        var handler = new GetUserByIdHandler(ctx.Users, ctx.Chats, new FakeCurrentUser(customer.Id));
-        var result = await handler.Handle(new GetUserByIdQuery(other.Id), CancellationToken.None);
+        var handler = new UserService(ctx.Users, ctx.Avatars, ctx.Chats, ctx.Clock);
+        var result = await handler.GetUserByIdAsync(
+            new GetUserByIdQuery(other.Id), new CallerContext(customer.Id, null, []), CancellationToken.None);
 
         Assert.True(result.IsFailure);
         Assert.Equal(UserErrors.NotFound, result.Error);
@@ -81,19 +85,17 @@ public sealed class UserHandlerTests
             ctx.Ids.NewId(), customer.Id, other.Id, Now).Value!;
         ctx.Chats.Seed(dm);
 
-        var profile = await new GetUserByIdHandler(ctx.Users, ctx.Chats, new FakeCurrentUser(customer.Id))
-            .Handle(new GetUserByIdQuery(other.Id), CancellationToken.None);
+        var profile = await new UserService(ctx.Users, ctx.Avatars, ctx.Chats, ctx.Clock)
+            .GetUserByIdAsync(new GetUserByIdQuery(other.Id), new CallerContext(customer.Id, null, []), CancellationToken.None);
         Assert.True(profile.IsSuccess);
         Assert.Equal(other.Id, profile.Value!.Id);
 
-        var uploaded = await new UploadAvatarHandler(
-                ctx.Users, ctx.Avatars, ctx.Clock, new FakeCurrentUser(other.Id))
-            .Handle(new UploadAvatarCommand(PngBytes, "image/png"), CancellationToken.None);
+        var uploaded = await new UserService(ctx.Users, ctx.Avatars, ctx.Chats, ctx.Clock)
+            .UploadAvatarAsync(new UploadAvatarCommand(PngBytes, "image/png"), new CallerContext(other.Id, null, []), CancellationToken.None);
         Assert.True(uploaded.IsSuccess);
 
-        var fetched = await new GetAvatarHandler(
-                ctx.Users, ctx.Avatars, ctx.Chats, new FakeCurrentUser(customer.Id))
-            .Handle(new GetAvatarQuery(other.Id), CancellationToken.None);
+        var fetched = await new UserService(ctx.Users, ctx.Avatars, ctx.Chats, ctx.Clock)
+            .GetAvatarAsync(new GetAvatarQuery(other.Id), new CallerContext(customer.Id, null, []), CancellationToken.None);
         Assert.True(fetched.IsSuccess);
         Assert.Equal(PngBytes, fetched.Value!.Bytes);
     }
@@ -105,14 +107,12 @@ public sealed class UserHandlerTests
         var customer = await SeedCustomerAsync(ctx);
         var other = await SeedCustomerAsync(ctx, "other.c");
 
-        var uploaded = await new UploadAvatarHandler(
-                ctx.Users, ctx.Avatars, ctx.Clock, new FakeCurrentUser(other.Id))
-            .Handle(new UploadAvatarCommand(PngBytes, "image/png"), CancellationToken.None);
+        var uploaded = await new UserService(ctx.Users, ctx.Avatars, ctx.Chats, ctx.Clock)
+            .UploadAvatarAsync(new UploadAvatarCommand(PngBytes, "image/png"), new CallerContext(other.Id, null, []), CancellationToken.None);
         Assert.True(uploaded.IsSuccess);
 
-        var fetched = await new GetAvatarHandler(
-                ctx.Users, ctx.Avatars, ctx.Chats, new FakeCurrentUser(customer.Id))
-            .Handle(new GetAvatarQuery(other.Id), CancellationToken.None);
+        var fetched = await new UserService(ctx.Users, ctx.Avatars, ctx.Chats, ctx.Clock)
+            .GetAvatarAsync(new GetAvatarQuery(other.Id), new CallerContext(customer.Id, null, []), CancellationToken.None);
         Assert.True(fetched.IsFailure);
         Assert.Equal(UserErrors.NotFound, fetched.Error);
     }
@@ -123,8 +123,9 @@ public sealed class UserHandlerTests
         var ctx = new Ctx();
         var customer = await SeedCustomerAsync(ctx);
 
-        var handler = new BlockUserHandler(ctx.Users, ctx.Clock, new FakeCurrentUser(customer.Id));
-        var result = await handler.Handle(new BlockUserCommand(customer.Id), CancellationToken.None);
+        var handler = new UserService(ctx.Users, ctx.Avatars, ctx.Chats, ctx.Clock);
+        var result = await handler.BlockUserAsync(
+            new BlockUserCommand(customer.Id), new CallerContext(customer.Id, null, []), CancellationToken.None);
 
         Assert.True(result.IsFailure);
         Assert.Equal(UserErrors.CannotBlockSelf, result.Error);
@@ -136,9 +137,9 @@ public sealed class UserHandlerTests
         var ctx = new Ctx();
         var customer = await SeedCustomerAsync(ctx);
 
-        var handler = new UploadAvatarHandler(ctx.Users, ctx.Avatars, ctx.Clock, new FakeCurrentUser(customer.Id));
-        var forged = await handler.Handle(
-            new UploadAvatarCommand("not-an-image-at-all"u8.ToArray(), "image/png"), CancellationToken.None);
+        var handler = new UserService(ctx.Users, ctx.Avatars, ctx.Chats, ctx.Clock);
+        var forged = await handler.UploadAvatarAsync(
+            new UploadAvatarCommand("not-an-image-at-all"u8.ToArray(), "image/png"), new CallerContext(customer.Id, null, []), CancellationToken.None);
 
         Assert.True(forged.IsFailure);
         Assert.Equal(UserErrors.AvatarUnsupportedType, forged.Error);
@@ -149,26 +150,26 @@ public sealed class UserHandlerTests
     {
         var ctx = new Ctx();
         var customer = await SeedCustomerAsync(ctx);
-        var me = new FakeCurrentUser(customer.Id);
+        var me = new CallerContext(customer.Id, null, []);
 
-        var uploaded = await new UploadAvatarHandler(ctx.Users, ctx.Avatars, ctx.Clock, me)
-            .Handle(new UploadAvatarCommand(PngBytes, "image/png"), CancellationToken.None);
+        var uploaded = await new UserService(ctx.Users, ctx.Avatars, ctx.Chats, ctx.Clock)
+            .UploadAvatarAsync(new UploadAvatarCommand(PngBytes, "image/png"), me, CancellationToken.None);
         Assert.True(uploaded.IsSuccess);
         Assert.NotNull(uploaded.Value!.AvatarUrl);
 
-        var fetched = await new GetAvatarHandler(ctx.Users, ctx.Avatars, ctx.Chats, me)
-            .Handle(new GetAvatarQuery(customer.Id), CancellationToken.None);
+        var fetched = await new UserService(ctx.Users, ctx.Avatars, ctx.Chats, ctx.Clock)
+            .GetAvatarAsync(new GetAvatarQuery(customer.Id), me, CancellationToken.None);
         Assert.True(fetched.IsSuccess);
         Assert.Equal(PngBytes, fetched.Value!.Bytes);
         Assert.Equal("image/png", fetched.Value.ContentType);
 
-        var removed = await new RemoveAvatarHandler(ctx.Users, ctx.Avatars, ctx.Clock, me)
-            .Handle(new RemoveAvatarCommand(), CancellationToken.None);
+        var removed = await new UserService(ctx.Users, ctx.Avatars, ctx.Chats, ctx.Clock)
+            .RemoveAvatarAsync(me, CancellationToken.None);
         Assert.True(removed.IsSuccess);
         Assert.Null(removed.Value!.AvatarUrl);
 
-        var gone = await new GetAvatarHandler(ctx.Users, ctx.Avatars, ctx.Chats, me)
-            .Handle(new GetAvatarQuery(customer.Id), CancellationToken.None);
+        var gone = await new UserService(ctx.Users, ctx.Avatars, ctx.Chats, ctx.Clock)
+            .GetAvatarAsync(new GetAvatarQuery(customer.Id), me, CancellationToken.None);
         Assert.True(gone.IsFailure);
     }
 

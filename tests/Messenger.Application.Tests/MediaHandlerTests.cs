@@ -2,6 +2,8 @@ using Messenger.Application.Features.Chats;
 using Messenger.Application.Features.Files;
 using Messenger.Application.Features.Messages;
 using Messenger.Application.Messaging;
+using Messenger.Application.Services;
+using Messenger.Application.Services.Implementations;
 using Messenger.Domain.Chats;
 using Messenger.Domain.Files;
 using Messenger.Domain.Messages;
@@ -39,26 +41,26 @@ public sealed class MediaHandlerTests
             return registered.Value!;
         }
 
-        public FakeCurrentUser As(User user) => new(user.Id);
+        public CallerContext As(User user) => new(user.Id, null, []);
     }
 
     private static async Task<Chat> SeedGroupAsync(Ctx ctx, User owner, params User[] members)
     {
         var ids = new List<string> { owner.Id };
         ids.AddRange(members.Select(m => m.Id));
-        var handler = new CreateGroupHandler(ctx.Chats, ctx.Users, ctx.Ids, ctx.Clock, ctx.As(owner));
-        var result = await handler.Handle(
-            new CreateGroupCommand("Team", ids, null), CancellationToken.None);
+        var handler = new ConversationService(ctx.Chats, ctx.Users, ctx.Ids, ctx.Clock);
+        var result = await handler.CreateGroupAsync(
+            new CreateGroupCommand("Team", ids, null), ctx.As(owner), CancellationToken.None);
         Assert.True(result.IsSuccess);
         return (await ctx.Chats.GetByIdAsync(result.Value!.Id, CancellationToken.None))!;
     }
 
     private static async Task<FileDto> UploadAsync(Ctx ctx, User user, byte[] bytes, string name, string type)
     {
-        var handler = new UploadFileHandler(
-            ctx.Files, ctx.Storage, ctx.Scanner, ctx.Ids, ctx.Clock, ctx.As(user));
-        var result = await handler.Handle(
-            new UploadFileCommand(bytes, name, type), CancellationToken.None);
+        var handler = new FileService(
+            ctx.Files, ctx.Storage, ctx.Scanner, ctx.Chats, ctx.Ids, ctx.Clock);
+        var result = await handler.UploadFileAsync(
+            new UploadFileCommand(bytes, name, type), ctx.As(user), CancellationToken.None);
         Assert.True(result.IsSuccess);
         return result.Value!;
     }
@@ -86,11 +88,11 @@ public sealed class MediaHandlerTests
     {
         var ctx = new Ctx();
         var user = await ctx.SeedUserAsync("up.bob");
-        var handler = new UploadFileHandler(
-            ctx.Files, ctx.Storage, ctx.Scanner, ctx.Ids, ctx.Clock, ctx.As(user));
+        var handler = new FileService(
+            ctx.Files, ctx.Storage, ctx.Scanner, ctx.Chats, ctx.Ids, ctx.Clock);
 
-        var result = await handler.Handle(
-            new UploadFileCommand(Png, "photo.jpg", "image/jpeg"), CancellationToken.None);
+        var result = await handler.UploadFileAsync(
+            new UploadFileCommand(Png, "photo.jpg", "image/jpeg"), ctx.As(user), CancellationToken.None);
 
         Assert.True(result.IsFailure);
         Assert.Equal(FileErrors.ContentMismatch, result.Error);
@@ -102,13 +104,13 @@ public sealed class MediaHandlerTests
     {
         var ctx = new Ctx();
         var user = await ctx.SeedUserAsync("up.carol");
-        var handler = new UploadFileHandler(
-            ctx.Files, ctx.Storage, ctx.Scanner, ctx.Ids, ctx.Clock, ctx.As(user));
+        var handler = new FileService(
+            ctx.Files, ctx.Storage, ctx.Scanner, ctx.Chats, ctx.Ids, ctx.Clock);
 
         var big = new byte[FileValidation.MaxImageBytes + 1];
         Png.CopyTo(big, 0);
-        var result = await handler.Handle(
-            new UploadFileCommand(big, "big.png", "image/png"), CancellationToken.None);
+        var result = await handler.UploadFileAsync(
+            new UploadFileCommand(big, "big.png", "image/png"), ctx.As(user), CancellationToken.None);
 
         Assert.True(result.IsFailure);
         Assert.Equal(FileErrors.TooLarge, result.Error);
@@ -120,11 +122,11 @@ public sealed class MediaHandlerTests
         var ctx = new Ctx();
         var user = await ctx.SeedUserAsync("up.dave");
         ctx.Scanner.Verdict = Application.Abstractions.ScanVerdict.Infected;
-        var handler = new UploadFileHandler(
-            ctx.Files, ctx.Storage, ctx.Scanner, ctx.Ids, ctx.Clock, ctx.As(user));
+        var handler = new FileService(
+            ctx.Files, ctx.Storage, ctx.Scanner, ctx.Chats, ctx.Ids, ctx.Clock);
 
-        var result = await handler.Handle(
-            new UploadFileCommand(Png, "photo.png", "image/png"), CancellationToken.None);
+        var result = await handler.UploadFileAsync(
+            new UploadFileCommand(Png, "photo.png", "image/png"), ctx.As(user), CancellationToken.None);
 
         Assert.True(result.IsFailure);
         Assert.Equal(FileErrors.ScanRejected, result.Error);
@@ -137,11 +139,11 @@ public sealed class MediaHandlerTests
         var ctx = new Ctx();
         var user = await ctx.SeedUserAsync("up.erin");
         ctx.Storage.FailNext = true;
-        var handler = new UploadFileHandler(
-            ctx.Files, ctx.Storage, ctx.Scanner, ctx.Ids, ctx.Clock, ctx.As(user));
+        var handler = new FileService(
+            ctx.Files, ctx.Storage, ctx.Scanner, ctx.Chats, ctx.Ids, ctx.Clock);
 
-        var result = await handler.Handle(
-            new UploadFileCommand(Png, "photo.png", "image/png"), CancellationToken.None);
+        var result = await handler.UploadFileAsync(
+            new UploadFileCommand(Png, "photo.png", "image/png"), ctx.As(user), CancellationToken.None);
 
         Assert.True(result.IsFailure);
         Assert.Equal(FileErrors.StorageUnavailable, result.Error);
@@ -156,9 +158,9 @@ public sealed class MediaHandlerTests
         var chat = await SeedGroupAsync(ctx, a, b);
         var upload = await UploadAsync(ctx, a, Png, "photo.png", "image/png");
 
-        var sent = await new SendMessageHandler(
-                ctx.Chats, ctx.Messages, ctx.Files, ctx.Users, ctx.Ids, ctx.Clock, ctx.As(a))
-            .Handle(new SendMessageCommand(chat.Id, "", "k-1", null, upload.Id), CancellationToken.None);
+        var sent = await new MessageService(
+                ctx.Chats, ctx.Messages, ctx.Files, ctx.Users, ctx.Ids, ctx.Clock)
+            .SendMessageAsync(new SendMessageCommand(chat.Id, "", "k-1", null, upload.Id), ctx.As(a), CancellationToken.None);
 
         Assert.True(sent.IsSuccess);
         Assert.NotNull(sent.Value!.Attachment);
@@ -183,27 +185,27 @@ public sealed class MediaHandlerTests
         var upload = await UploadAsync(ctx, a, Png, "photo.png", "image/png");
 
         // Another user's upload is unusable (no existence leak: NotOwner, not NotFound).
-        var foreign = await new SendMessageHandler(
-                ctx.Chats, ctx.Messages, ctx.Files, ctx.Users, ctx.Ids, ctx.Clock, ctx.As(b))
-            .Handle(new SendMessageCommand(chat.Id, "mine?", "k-9", null, upload.Id), CancellationToken.None);
+        var foreign = await new MessageService(
+                ctx.Chats, ctx.Messages, ctx.Files, ctx.Users, ctx.Ids, ctx.Clock)
+            .SendMessageAsync(new SendMessageCommand(chat.Id, "mine?", "k-9", null, upload.Id), ctx.As(b), CancellationToken.None);
         Assert.True(foreign.IsFailure);
         Assert.Equal(FileErrors.NotOwner, foreign.Error);
 
-        await new SendMessageHandler(
-                ctx.Chats, ctx.Messages, ctx.Files, ctx.Users, ctx.Ids, ctx.Clock, ctx.As(a))
-            .Handle(new SendMessageCommand(chat.Id, "", "k-1", null, upload.Id), CancellationToken.None);
+        await new MessageService(
+                ctx.Chats, ctx.Messages, ctx.Files, ctx.Users, ctx.Ids, ctx.Clock)
+            .SendMessageAsync(new SendMessageCommand(chat.Id, "", "k-1", null, upload.Id), ctx.As(a), CancellationToken.None);
 
         // The same upload cannot back a second message.
-        var reuse = await new SendMessageHandler(
-                ctx.Chats, ctx.Messages, ctx.Files, ctx.Users, ctx.Ids, ctx.Clock, ctx.As(a))
-            .Handle(new SendMessageCommand(chat.Id, "", "k-2", null, upload.Id), CancellationToken.None);
+        var reuse = await new MessageService(
+                ctx.Chats, ctx.Messages, ctx.Files, ctx.Users, ctx.Ids, ctx.Clock)
+            .SendMessageAsync(new SendMessageCommand(chat.Id, "", "k-2", null, upload.Id), ctx.As(a), CancellationToken.None);
         Assert.True(reuse.IsFailure);
         Assert.Equal(FileErrors.AlreadyAttached, reuse.Error);
 
         // Unknown file id.
-        var missing = await new SendMessageHandler(
-                ctx.Chats, ctx.Messages, ctx.Files, ctx.Users, ctx.Ids, ctx.Clock, ctx.As(a))
-            .Handle(new SendMessageCommand(chat.Id, "", "k-3", null, "id-999"), CancellationToken.None);
+        var missing = await new MessageService(
+                ctx.Chats, ctx.Messages, ctx.Files, ctx.Users, ctx.Ids, ctx.Clock)
+            .SendMessageAsync(new SendMessageCommand(chat.Id, "", "k-3", null, "id-999"), ctx.As(a), CancellationToken.None);
         Assert.True(missing.IsFailure);
         Assert.Equal(FileErrors.NotFound, missing.Error);
     }
@@ -218,14 +220,14 @@ public sealed class MediaHandlerTests
         var dst = await SeedGroupAsync(ctx, a, b);
         var upload = await UploadAsync(ctx, a, Mp4, "clip.mp4", "video/mp4");
 
-        var sent = await new SendMessageHandler(
-                ctx.Chats, ctx.Messages, ctx.Files, ctx.Users, ctx.Ids, ctx.Clock, ctx.As(a))
-            .Handle(new SendMessageCommand(src.Id, "", "k-1", null, upload.Id), CancellationToken.None);
+        var sent = await new MessageService(
+                ctx.Chats, ctx.Messages, ctx.Files, ctx.Users, ctx.Ids, ctx.Clock)
+            .SendMessageAsync(new SendMessageCommand(src.Id, "", "k-1", null, upload.Id), ctx.As(a), CancellationToken.None);
         Assert.True(sent.IsSuccess);
 
-        var fwd = await new ForwardMessageHandler(
-                ctx.Chats, ctx.Messages, ctx.Files, ctx.Users, ctx.Ids, ctx.Clock, ctx.As(a))
-            .Handle(new ForwardMessageCommand(src.Id, sent.Value!.Id, dst.Id, "k-fwd"), CancellationToken.None);
+        var fwd = await new MessageService(
+                ctx.Chats, ctx.Messages, ctx.Files, ctx.Users, ctx.Ids, ctx.Clock)
+            .ForwardMessageAsync(new ForwardMessageCommand(src.Id, sent.Value!.Id, dst.Id, "k-fwd"), ctx.As(a), CancellationToken.None);
 
         Assert.True(fwd.IsSuccess);
         Assert.NotNull(fwd.Value!.Attachment);
@@ -246,21 +248,23 @@ public sealed class MediaHandlerTests
         var chat = await SeedGroupAsync(ctx, a, b);
         var upload = await UploadAsync(ctx, a, Png, "photo.png", "image/png");
 
-        var sent = await new SendMessageHandler(
-                ctx.Chats, ctx.Messages, ctx.Files, ctx.Users, ctx.Ids, ctx.Clock, ctx.As(a))
-            .Handle(new SendMessageCommand(chat.Id, "", "k-1", null, upload.Id), CancellationToken.None);
+        var sent = await new MessageService(
+                ctx.Chats, ctx.Messages, ctx.Files, ctx.Users, ctx.Ids, ctx.Clock)
+            .SendMessageAsync(new SendMessageCommand(chat.Id, "", "k-1", null, upload.Id), ctx.As(a), CancellationToken.None);
         Assert.True(sent.IsSuccess);
 
         // Member downloads the exact bytes.
-        var memberDl = await new DownloadFileHandler(ctx.Files, ctx.Storage, ctx.Chats, ctx.As(b))
-            .Handle(new DownloadFileQuery(upload.Id), CancellationToken.None);
+        var memberDl = await new FileService(
+                ctx.Files, ctx.Storage, ctx.Scanner, ctx.Chats, ctx.Ids, ctx.Clock)
+            .DownloadFileAsync(new DownloadFileQuery(upload.Id), ctx.As(b), CancellationToken.None);
         Assert.True(memberDl.IsSuccess);
         Assert.Equal(Png, memberDl.Value!.Bytes);
         Assert.Equal("image/png", memberDl.Value.ContentType);
 
         // Outsider learns nothing (neutral NotFound).
-        var denied = await new DownloadFileHandler(ctx.Files, ctx.Storage, ctx.Chats, ctx.As(outsider))
-            .Handle(new DownloadFileQuery(upload.Id), CancellationToken.None);
+        var denied = await new FileService(
+                ctx.Files, ctx.Storage, ctx.Scanner, ctx.Chats, ctx.Ids, ctx.Clock)
+            .DownloadFileAsync(new DownloadFileQuery(upload.Id), ctx.As(outsider), CancellationToken.None);
         Assert.True(denied.IsFailure);
         Assert.Equal(FileErrors.NotFound, denied.Error);
     }
@@ -273,12 +277,14 @@ public sealed class MediaHandlerTests
         var other = await ctx.SeedUserAsync("pv.other");
         var upload = await UploadAsync(ctx, a, Png, "photo.png", "image/png");
 
-        var own = await new DownloadFileHandler(ctx.Files, ctx.Storage, ctx.Chats, ctx.As(a))
-            .Handle(new DownloadFileQuery(upload.Id), CancellationToken.None);
+        var own = await new FileService(
+                ctx.Files, ctx.Storage, ctx.Scanner, ctx.Chats, ctx.Ids, ctx.Clock)
+            .DownloadFileAsync(new DownloadFileQuery(upload.Id), ctx.As(a), CancellationToken.None);
         Assert.True(own.IsSuccess);
 
-        var stranger = await new DownloadFileHandler(ctx.Files, ctx.Storage, ctx.Chats, ctx.As(other))
-            .Handle(new DownloadFileQuery(upload.Id), CancellationToken.None);
+        var stranger = await new FileService(
+                ctx.Files, ctx.Storage, ctx.Scanner, ctx.Chats, ctx.Ids, ctx.Clock)
+            .DownloadFileAsync(new DownloadFileQuery(upload.Id), ctx.As(other), CancellationToken.None);
         Assert.True(stranger.IsFailure);
         Assert.Equal(FileErrors.NotFound, stranger.Error);
     }
@@ -292,20 +298,21 @@ public sealed class MediaHandlerTests
         var chat = await SeedGroupAsync(ctx, owner, member);
         var upload = await UploadAsync(ctx, member, Png, "photo.png", "image/png");
 
-        var sent = await new SendMessageHandler(
-                ctx.Chats, ctx.Messages, ctx.Files, ctx.Users, ctx.Ids, ctx.Clock, ctx.As(member))
-            .Handle(new SendMessageCommand(chat.Id, "", "k-1", null, upload.Id), CancellationToken.None);
+        var sent = await new MessageService(
+                ctx.Chats, ctx.Messages, ctx.Files, ctx.Users, ctx.Ids, ctx.Clock)
+            .SendMessageAsync(new SendMessageCommand(chat.Id, "", "k-1", null, upload.Id), ctx.As(member), CancellationToken.None);
         Assert.True(sent.IsSuccess);
 
-        var deleted = await new DeleteMessageHandler(
-                ctx.Chats, ctx.Messages, ctx.Files, ctx.Users, ctx.Clock, ctx.As(member))
-            .Handle(new DeleteMessageCommand(sent.Value!.Id), CancellationToken.None);
+        var deleted = await new MessageService(
+                ctx.Chats, ctx.Messages, ctx.Files, ctx.Users, ctx.Ids, ctx.Clock)
+            .DeleteMessageAsync(new DeleteMessageCommand(sent.Value!.Id), ctx.As(member), CancellationToken.None);
         Assert.True(deleted.IsSuccess);
         Assert.Null(deleted.Value!.Attachment);
 
         // Retention owns bytes now: still fetchable by members (shared forwards may reference them).
-        var after = await new DownloadFileHandler(ctx.Files, ctx.Storage, ctx.Chats, ctx.As(owner))
-            .Handle(new DownloadFileQuery(upload.Id), CancellationToken.None);
+        var after = await new FileService(
+                ctx.Files, ctx.Storage, ctx.Scanner, ctx.Chats, ctx.Ids, ctx.Clock)
+            .DownloadFileAsync(new DownloadFileQuery(upload.Id), ctx.As(owner), CancellationToken.None);
         Assert.True(after.IsSuccess);
     }
 
@@ -319,24 +326,27 @@ public sealed class MediaHandlerTests
         var pending = await UploadAsync(ctx, a, Png, "photo.png", "image/png");
 
         // Non-owner cannot delete.
-        var forbidden = await new DeleteFileHandler(ctx.Files, ctx.Storage, ctx.As(b))
-            .Handle(new DeleteFileCommand(pending.Id), CancellationToken.None);
+        var forbidden = await new FileService(
+                ctx.Files, ctx.Storage, ctx.Scanner, ctx.Chats, ctx.Ids, ctx.Clock)
+            .DeleteFileAsync(new DeleteFileCommand(pending.Id), ctx.As(b), CancellationToken.None);
         Assert.True(forbidden.IsFailure);
         Assert.Equal(FileErrors.NotOwner, forbidden.Error);
 
         // Owner deletes the pending upload: metadata + bytes gone.
-        var removed = await new DeleteFileHandler(ctx.Files, ctx.Storage, ctx.As(a))
-            .Handle(new DeleteFileCommand(pending.Id), CancellationToken.None);
+        var removed = await new FileService(
+                ctx.Files, ctx.Storage, ctx.Scanner, ctx.Chats, ctx.Ids, ctx.Clock)
+            .DeleteFileAsync(new DeleteFileCommand(pending.Id), ctx.As(a), CancellationToken.None);
         Assert.True(removed.IsSuccess);
         Assert.Null(await ctx.Files.GetByIdAsync(pending.Id, CancellationToken.None));
 
         // Attached files are immutable via this path.
         var attached = await UploadAsync(ctx, a, Png, "keep.png", "image/png");
-        await new SendMessageHandler(
-                ctx.Chats, ctx.Messages, ctx.Files, ctx.Users, ctx.Ids, ctx.Clock, ctx.As(a))
-            .Handle(new SendMessageCommand(chat.Id, "", "k-1", null, attached.Id), CancellationToken.None);
-        var blocked = await new DeleteFileHandler(ctx.Files, ctx.Storage, ctx.As(a))
-            .Handle(new DeleteFileCommand(attached.Id), CancellationToken.None);
+        await new MessageService(
+                ctx.Chats, ctx.Messages, ctx.Files, ctx.Users, ctx.Ids, ctx.Clock)
+            .SendMessageAsync(new SendMessageCommand(chat.Id, "", "k-1", null, attached.Id), ctx.As(a), CancellationToken.None);
+        var blocked = await new FileService(
+                ctx.Files, ctx.Storage, ctx.Scanner, ctx.Chats, ctx.Ids, ctx.Clock)
+            .DeleteFileAsync(new DeleteFileCommand(attached.Id), ctx.As(a), CancellationToken.None);
         Assert.True(blocked.IsFailure);
         Assert.Equal(FileErrors.AlreadyAttached, blocked.Error);
     }
@@ -348,12 +358,13 @@ public sealed class MediaHandlerTests
         var a = await ctx.SeedUserAsync("hist.a");
         var chat = await SeedGroupAsync(ctx, a, await ctx.SeedUserAsync("hist.b"));
         var upload = await UploadAsync(ctx, a, Png, "photo.png", "image/png");
-        await new SendMessageHandler(
-                ctx.Chats, ctx.Messages, ctx.Files, ctx.Users, ctx.Ids, ctx.Clock, ctx.As(a))
-            .Handle(new SendMessageCommand(chat.Id, "look", "k-1", null, upload.Id), CancellationToken.None);
+        await new MessageService(
+                ctx.Chats, ctx.Messages, ctx.Files, ctx.Users, ctx.Ids, ctx.Clock)
+            .SendMessageAsync(new SendMessageCommand(chat.Id, "look", "k-1", null, upload.Id), ctx.As(a), CancellationToken.None);
 
-        var page = await new GetHistoryHandler(ctx.Chats, ctx.Messages, ctx.Files, ctx.Users, ctx.As(a))
-            .Handle(new GetHistoryQuery(chat.Id, null, 10), CancellationToken.None);
+        var page = await new MessageService(
+                ctx.Chats, ctx.Messages, ctx.Files, ctx.Users, ctx.Ids, ctx.Clock)
+            .GetHistoryAsync(new GetHistoryQuery(chat.Id, null, 10), ctx.As(a), CancellationToken.None);
 
         Assert.True(page.IsSuccess);
         Assert.Single(page.Value!.Items);

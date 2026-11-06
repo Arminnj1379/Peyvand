@@ -1,6 +1,8 @@
 using Messenger.Application.Features.Chats;
 using Messenger.Application.Features.Messages;
 using Messenger.Application.Messaging;
+using Messenger.Application.Services;
+using Messenger.Application.Services.Implementations;
 using Messenger.Domain.Chats;
 using Messenger.Domain.Messages;
 using Messenger.Domain.Users;
@@ -19,6 +21,7 @@ public sealed class MessagingHandlerTests
         public FakeFileStore Files = new();
         public FakeFileStorage Storage = new();
         public FakeFileScanner Scanner = new();
+        public FakeAvatarStorage Avatars = new();
         public FakeClock Clock = new(Now);
         public FakeIds Ids = new();
 
@@ -31,16 +34,16 @@ public sealed class MessagingHandlerTests
             return registered.Value!;
         }
 
-        public FakeCurrentUser As(User user) => new(user.Id);
+        public CallerContext As(User user) => new(user.Id, null, []);
     }
 
     private static async Task<Chat> SeedGroupAsync(Ctx ctx, User owner, params User[] members)
     {
         var ids = new List<string> { owner.Id };
         ids.AddRange(members.Select(m => m.Id));
-        var handler = new CreateGroupHandler(ctx.Chats, ctx.Users, ctx.Ids, ctx.Clock, ctx.As(owner));
-        var result = await handler.Handle(
-            new CreateGroupCommand("Team", ids, null), CancellationToken.None);
+        var svc = new ConversationService(ctx.Chats, ctx.Users, ctx.Ids, ctx.Clock);
+        var result = await svc.CreateGroupAsync(
+            new CreateGroupCommand("Team", ids, null), ctx.As(owner), CancellationToken.None);
         Assert.True(result.IsSuccess);
         var chat = await ctx.Chats.GetByIdAsync(result.Value!.Id, CancellationToken.None);
         return chat!;
@@ -48,10 +51,10 @@ public sealed class MessagingHandlerTests
 
     private static async Task<MessageDto> SendAsync(Ctx ctx, User sender, string chatId, string body, string clientId)
     {
-        var handler = new SendMessageHandler(
-            ctx.Chats, ctx.Messages, ctx.Files, ctx.Users, ctx.Ids, ctx.Clock, ctx.As(sender));
-        var result = await handler.Handle(
-            new SendMessageCommand(chatId, body, clientId, null), CancellationToken.None);
+        var svc = new MessageService(
+            ctx.Chats, ctx.Messages, ctx.Files, ctx.Users, ctx.Ids, ctx.Clock);
+        var result = await svc.SendMessageAsync(
+            new SendMessageCommand(chatId, body, clientId, null), ctx.As(sender), CancellationToken.None);
         Assert.True(result.IsSuccess);
         return result.Value!;
     }
@@ -63,9 +66,9 @@ public sealed class MessagingHandlerTests
         var a = await ctx.SeedUserAsync("dm.a");
         var b = await ctx.SeedUserAsync("dm.b");
 
-        var handler = new CreateDmHandler(ctx.Chats, ctx.Users, ctx.Ids, ctx.Clock, ctx.As(a));
-        var first = await handler.Handle(new CreateDmCommand(b.Id), CancellationToken.None);
-        var second = await handler.Handle(new CreateDmCommand(b.Id), CancellationToken.None);
+        var svc = new ConversationService(ctx.Chats, ctx.Users, ctx.Ids, ctx.Clock);
+        var first = await svc.CreateDmAsync(new CreateDmCommand(b.Id), ctx.As(a), CancellationToken.None);
+        var second = await svc.CreateDmAsync(new CreateDmCommand(b.Id), ctx.As(a), CancellationToken.None);
 
         Assert.True(first.IsSuccess);
         Assert.True(second.IsSuccess);
@@ -80,8 +83,8 @@ public sealed class MessagingHandlerTests
         var b = await ctx.SeedUserAsync("dmr.b");
         ctx.Chats.SimulateDmRaceOnAdd = true;
 
-        var handler = new CreateDmHandler(ctx.Chats, ctx.Users, ctx.Ids, ctx.Clock, ctx.As(a));
-        var result = await handler.Handle(new CreateDmCommand(b.Id), CancellationToken.None);
+        var svc = new ConversationService(ctx.Chats, ctx.Users, ctx.Ids, ctx.Clock);
+        var result = await svc.CreateDmAsync(new CreateDmCommand(b.Id), ctx.As(a), CancellationToken.None);
 
         Assert.True(result.IsSuccess);
         Assert.Equal("race-winner", result.Value!.Id);
@@ -119,8 +122,8 @@ public sealed class MessagingHandlerTests
 
         Assert.Equal(first.Id, second.Id);
         Assert.Equal(first.Seq, second.Seq);
-        var history = await new GetHistoryHandler(ctx.Chats, ctx.Messages, ctx.Files, ctx.Users, ctx.As(a))
-            .Handle(new GetHistoryQuery(chat.Id, null, 10), CancellationToken.None);
+        var history = await new MessageService(ctx.Chats, ctx.Messages, ctx.Files, ctx.Users, ctx.Ids, ctx.Clock)
+            .GetHistoryAsync(new GetHistoryQuery(chat.Id, null, 10), ctx.As(a), CancellationToken.None);
         Assert.True(history.IsSuccess);
         Assert.Single(history.Value!.Items);
     }
@@ -134,14 +137,14 @@ public sealed class MessagingHandlerTests
         var outsider = await ctx.SeedUserAsync("authz.out");
         var chat = await SeedGroupAsync(ctx, a, b);
 
-        var send = await new SendMessageHandler(
-                ctx.Chats, ctx.Messages, ctx.Files, ctx.Users, ctx.Ids, ctx.Clock, ctx.As(outsider))
-            .Handle(new SendMessageCommand(chat.Id, "hi", "k-9", null), CancellationToken.None);
+        var send = await new MessageService(
+                ctx.Chats, ctx.Messages, ctx.Files, ctx.Users, ctx.Ids, ctx.Clock)
+            .SendMessageAsync(new SendMessageCommand(chat.Id, "hi", "k-9", null), ctx.As(outsider), CancellationToken.None);
         Assert.True(send.IsFailure);
         Assert.Equal(ChatErrors.Forbidden, send.Error);
 
-        var history = await new GetHistoryHandler(ctx.Chats, ctx.Messages, ctx.Files, ctx.Users, ctx.As(outsider))
-            .Handle(new GetHistoryQuery(chat.Id, null, 10), CancellationToken.None);
+        var history = await new MessageService(ctx.Chats, ctx.Messages, ctx.Files, ctx.Users, ctx.Ids, ctx.Clock)
+            .GetHistoryAsync(new GetHistoryQuery(chat.Id, null, 10), ctx.As(outsider), CancellationToken.None);
         Assert.True(history.IsFailure);
         Assert.Equal(ChatErrors.Forbidden, history.Error);
     }
@@ -152,13 +155,13 @@ public sealed class MessagingHandlerTests
         var ctx = new Ctx();
         var owner = await ctx.SeedUserAsync("chan.owner");
         var sub = await ctx.SeedUserAsync("chan.sub");
-        var created = await new CreateChannelHandler(ctx.Chats, ctx.Users, ctx.Ids, ctx.Clock, ctx.As(owner))
-            .Handle(new CreateChannelCommand("News", null, [sub.Id]), CancellationToken.None);
+        var created = await new ConversationService(ctx.Chats, ctx.Users, ctx.Ids, ctx.Clock)
+            .CreateChannelAsync(new CreateChannelCommand("News", null, [sub.Id]), ctx.As(owner), CancellationToken.None);
         Assert.True(created.IsSuccess);
 
-        var send = await new SendMessageHandler(
-                ctx.Chats, ctx.Messages, ctx.Files, ctx.Users, ctx.Ids, ctx.Clock, ctx.As(sub))
-            .Handle(new SendMessageCommand(created.Value!.Id, "hi", "k-1", null), CancellationToken.None);
+        var send = await new MessageService(
+                ctx.Chats, ctx.Messages, ctx.Files, ctx.Users, ctx.Ids, ctx.Clock)
+            .SendMessageAsync(new SendMessageCommand(created.Value!.Id, "hi", "k-1", null), ctx.As(sub), CancellationToken.None);
         Assert.True(send.IsFailure);
         Assert.Equal(ChatErrors.CannotPost, send.Error);
     }
@@ -174,21 +177,21 @@ public sealed class MessagingHandlerTests
             await SendAsync(ctx, a, chat.Id, $"msg {i}", $"k-{i}");
         }
 
-        var handler = new GetHistoryHandler(ctx.Chats, ctx.Messages, ctx.Files, ctx.Users, ctx.As(a));
-        var latest = await handler.Handle(new GetHistoryQuery(chat.Id, null, 2), CancellationToken.None);
+        var svc = new MessageService(ctx.Chats, ctx.Messages, ctx.Files, ctx.Users, ctx.Ids, ctx.Clock);
+        var latest = await svc.GetHistoryAsync(new GetHistoryQuery(chat.Id, null, 2), ctx.As(a), CancellationToken.None);
 
         Assert.True(latest.IsSuccess);
         Assert.True(latest.Value!.HasMore);
         Assert.Equal([4, 5], latest.Value.Items.Select(m => m.Seq).ToList());
         Assert.NotNull(latest.Value.NextCursor);
 
-        var older = await handler.Handle(
-            new GetHistoryQuery(chat.Id, latest.Value.NextCursor, 2), CancellationToken.None);
+        var older = await svc.GetHistoryAsync(
+            new GetHistoryQuery(chat.Id, latest.Value.NextCursor, 2), ctx.As(a), CancellationToken.None);
         Assert.True(older.IsSuccess);
         Assert.Equal([2, 3], older.Value!.Items.Select(m => m.Seq).ToList());
 
-        var oldest = await handler.Handle(
-            new GetHistoryQuery(chat.Id, older.Value.NextCursor, 2), CancellationToken.None);
+        var oldest = await svc.GetHistoryAsync(
+            new GetHistoryQuery(chat.Id, older.Value.NextCursor, 2), ctx.As(a), CancellationToken.None);
         Assert.True(oldest.IsSuccess);
         Assert.Equal([1], oldest.Value!.Items.Select(m => m.Seq).ToList());
         Assert.False(oldest.Value.HasMore);
@@ -204,8 +207,8 @@ public sealed class MessagingHandlerTests
         await SendAsync(ctx, a, chat.Id, "two", "k-2");
         await SendAsync(ctx, a, chat.Id, "three", "k-3");
 
-        var result = await new SyncMessagesHandler(ctx.Chats, ctx.Messages, ctx.Files, ctx.Users, ctx.As(a))
-            .Handle(new SyncMessagesQuery(chat.Id, 1, 10), CancellationToken.None);
+        var result = await new MessageService(ctx.Chats, ctx.Messages, ctx.Files, ctx.Users, ctx.Ids, ctx.Clock)
+            .SyncMessagesAsync(new SyncMessagesQuery(chat.Id, 1, 10), ctx.As(a), CancellationToken.None);
 
         Assert.True(result.IsSuccess);
         Assert.Equal([2, 3], result.Value!.Select(m => m.Seq).ToList());
@@ -220,14 +223,14 @@ public sealed class MessagingHandlerTests
         var chat = await SeedGroupAsync(ctx, a, b);
         var sent = await SendAsync(ctx, a, chat.Id, "original", "k-1");
 
-        var edited = await new EditMessageHandler(ctx.Chats, ctx.Messages, ctx.Files, ctx.Users, ctx.Clock, ctx.As(a))
-            .Handle(new EditMessageCommand(sent.Id, "updated"), CancellationToken.None);
+        var edited = await new MessageService(ctx.Chats, ctx.Messages, ctx.Files, ctx.Users, ctx.Ids, ctx.Clock)
+            .EditMessageAsync(new EditMessageCommand(sent.Id, "updated"), ctx.As(a), CancellationToken.None);
         Assert.True(edited.IsSuccess);
         Assert.True(edited.Value!.IsEdited);
         Assert.Equal("updated", edited.Value.Body);
 
-        var theft = await new EditMessageHandler(ctx.Chats, ctx.Messages, ctx.Files, ctx.Users, ctx.Clock, ctx.As(b))
-            .Handle(new EditMessageCommand(sent.Id, "hijack"), CancellationToken.None);
+        var theft = await new MessageService(ctx.Chats, ctx.Messages, ctx.Files, ctx.Users, ctx.Ids, ctx.Clock)
+            .EditMessageAsync(new EditMessageCommand(sent.Id, "hijack"), ctx.As(b), CancellationToken.None);
         Assert.True(theft.IsFailure);
         Assert.Equal(MessageErrors.NotSender, theft.Error);
     }
@@ -241,8 +244,8 @@ public sealed class MessagingHandlerTests
         var chat = await SeedGroupAsync(ctx, owner, member);
         var sent = await SendAsync(ctx, member, chat.Id, "bye", "k-1");
 
-        var deleted = await new DeleteMessageHandler(ctx.Chats, ctx.Messages, ctx.Files, ctx.Users, ctx.Clock, ctx.As(owner))
-            .Handle(new DeleteMessageCommand(sent.Id), CancellationToken.None);
+        var deleted = await new MessageService(ctx.Chats, ctx.Messages, ctx.Files, ctx.Users, ctx.Ids, ctx.Clock)
+            .DeleteMessageAsync(new DeleteMessageCommand(sent.Id), ctx.As(owner), CancellationToken.None);
         Assert.True(deleted.IsSuccess);
         Assert.True(deleted.Value!.IsDeleted);
     }
@@ -256,8 +259,8 @@ public sealed class MessagingHandlerTests
         var chat = await SeedGroupAsync(ctx, a, b);
         var sent = await SendAsync(ctx, a, chat.Id, "mine", "k-1");
 
-        var result = await new DeleteMessageHandler(ctx.Chats, ctx.Messages, ctx.Files, ctx.Users, ctx.Clock, ctx.As(b))
-            .Handle(new DeleteMessageCommand(sent.Id), CancellationToken.None);
+        var result = await new MessageService(ctx.Chats, ctx.Messages, ctx.Files, ctx.Users, ctx.Ids, ctx.Clock)
+            .DeleteMessageAsync(new DeleteMessageCommand(sent.Id), ctx.As(b), CancellationToken.None);
         Assert.True(result.IsFailure);
         Assert.Equal(MessageErrors.CannotDelete, result.Error);
     }
@@ -271,18 +274,18 @@ public sealed class MessagingHandlerTests
         var chat = await SeedGroupAsync(ctx, a, b);
         var first = await SendAsync(ctx, a, chat.Id, "question", "k-1");
 
-        var reply = await new SendMessageHandler(
-                ctx.Chats, ctx.Messages, ctx.Files, ctx.Users, ctx.Ids, ctx.Clock, ctx.As(b))
-            .Handle(new SendMessageCommand(chat.Id, "answer", "k-2", first.Id), CancellationToken.None);
+        var reply = await new MessageService(
+                ctx.Chats, ctx.Messages, ctx.Files, ctx.Users, ctx.Ids, ctx.Clock)
+            .SendMessageAsync(new SendMessageCommand(chat.Id, "answer", "k-2", first.Id), ctx.As(b), CancellationToken.None);
         Assert.True(reply.IsSuccess);
         Assert.Equal(MessageKind.Reply.ToString(), reply.Value!.Kind);
         Assert.NotNull(reply.Value.ReplyTo);
         Assert.Equal(first.Id, reply.Value.ReplyTo!.MessageId);
 
         var other = await SeedGroupAsync(ctx, a, b);
-        var fwd = await new ForwardMessageHandler(
-                ctx.Chats, ctx.Messages, ctx.Files, ctx.Users, ctx.Ids, ctx.Clock, ctx.As(a))
-            .Handle(new ForwardMessageCommand(chat.Id, first.Id, other.Id, "k-fwd"), CancellationToken.None);
+        var fwd = await new MessageService(
+                ctx.Chats, ctx.Messages, ctx.Files, ctx.Users, ctx.Ids, ctx.Clock)
+            .ForwardMessageAsync(new ForwardMessageCommand(chat.Id, first.Id, other.Id, "k-fwd"), ctx.As(a), CancellationToken.None);
         Assert.True(fwd.IsSuccess);
         Assert.Equal(MessageKind.Forward.ToString(), fwd.Value!.Kind);
         Assert.NotNull(fwd.Value.ForwardFrom);
@@ -302,8 +305,8 @@ public sealed class MessagingHandlerTests
         var before = await ctx.Chats.GetByIdAsync(chat.Id, CancellationToken.None);
         Assert.Equal(1, before!.GetMember(b.Id)!.UnreadCount);
 
-        var read = await new MarkReadHandler(ctx.Chats, ctx.Users, ctx.Clock, ctx.As(b))
-            .Handle(new MarkReadCommand(chat.Id, 1), CancellationToken.None);
+        var read = await new ChatInteractionService(ctx.Chats, ctx.Messages, ctx.Users, ctx.Clock)
+            .MarkReadAsync(new MarkReadCommand(chat.Id, 1), ctx.As(b), CancellationToken.None);
         Assert.True(read.IsSuccess);
         Assert.Equal(0, read.Value!.UnreadCount);
         Assert.Equal(1, read.Value.LastReadSeq);
@@ -318,22 +321,22 @@ public sealed class MessagingHandlerTests
         var newcomer = await ctx.SeedUserAsync("mem.new");
         var chat = await SeedGroupAsync(ctx, owner, member);
 
-        var added = await new AddMemberHandler(ctx.Chats, ctx.Users, ctx.Clock, ctx.As(owner))
-            .Handle(new AddMemberCommand(chat.Id, newcomer.Id), CancellationToken.None);
+        var added = await new GroupService(ctx.Chats, ctx.Users, ctx.Avatars, ctx.Clock)
+            .AddMemberAsync(new AddMemberCommand(chat.Id, newcomer.Id), ctx.As(owner), CancellationToken.None);
         Assert.True(added.IsSuccess);
         Assert.Equal(3, added.Value!.MemberCount);
 
-        var nonAdmin = await new AddMemberHandler(ctx.Chats, ctx.Users, ctx.Clock, ctx.As(member))
-            .Handle(new AddMemberCommand(chat.Id, newcomer.Id), CancellationToken.None);
+        var nonAdmin = await new GroupService(ctx.Chats, ctx.Users, ctx.Avatars, ctx.Clock)
+            .AddMemberAsync(new AddMemberCommand(chat.Id, newcomer.Id), ctx.As(member), CancellationToken.None);
         Assert.True(nonAdmin.IsFailure);
         Assert.Equal(ChatErrors.NotAdmin, nonAdmin.Error);
 
-        var promoted = await new SetMemberRoleHandler(ctx.Chats, ctx.Users, ctx.Clock, ctx.As(owner))
-            .Handle(new SetMemberRoleCommand(chat.Id, member.Id, "Admin"), CancellationToken.None);
+        var promoted = await new GroupService(ctx.Chats, ctx.Users, ctx.Avatars, ctx.Clock)
+            .SetMemberRoleAsync(new SetMemberRoleCommand(chat.Id, member.Id, "Admin"), ctx.As(owner), CancellationToken.None);
         Assert.True(promoted.IsSuccess);
 
-        var left = await new LeaveChatHandler(ctx.Chats, ctx.Clock, ctx.As(newcomer))
-            .Handle(new LeaveChatCommand(chat.Id), CancellationToken.None);
+        var left = await new GroupService(ctx.Chats, ctx.Users, ctx.Avatars, ctx.Clock)
+            .LeaveChatAsync(new LeaveChatCommand(chat.Id), ctx.As(newcomer), CancellationToken.None);
         Assert.True(left.IsSuccess);
     }
 }

@@ -1,5 +1,7 @@
 using Messenger.Application.Auth;
 using Messenger.Application.Features.Auth;
+using Messenger.Application.Services;
+using Messenger.Application.Services.Implementations;
 using Messenger.Domain.Users;
 
 namespace Messenger.Application.Tests;
@@ -21,8 +23,8 @@ public sealed class AuthHandlerTests
 
     private static async Task<AuthResultDto> RegisterAsync(Ctx ctx, string username = "sara.m")
     {
-        var handler = new RegisterCustomerHandler(ctx.Users, ctx.Sessions, ctx.Passwords, ctx.Tokens, ctx.Ids, ctx.Clock);
-        var result = await handler.Handle(
+        var auth = new AuthService(ctx.Users, ctx.Sessions, ctx.Passwords, ctx.Tokens, ctx.Ids, ctx.Clock);
+        var result = await auth.RegisterAsync(
             new RegisterCustomerCommand(username, "Sara", "password123", null, "web", null), CancellationToken.None);
         Assert.True(result.IsSuccess);
         return result.Value!;
@@ -46,8 +48,8 @@ public sealed class AuthHandlerTests
         var ctx = new Ctx();
         await RegisterAsync(ctx);
 
-        var handler = new RegisterCustomerHandler(ctx.Users, ctx.Sessions, ctx.Passwords, ctx.Tokens, ctx.Ids, ctx.Clock);
-        var result = await handler.Handle(
+        var auth = new AuthService(ctx.Users, ctx.Sessions, ctx.Passwords, ctx.Tokens, ctx.Ids, ctx.Clock);
+        var result = await auth.RegisterAsync(
             new RegisterCustomerCommand("Sara.M", "Other", "password123", null, null, null), CancellationToken.None);
 
         Assert.True(result.IsFailure);
@@ -62,8 +64,8 @@ public sealed class AuthHandlerTests
         // registration won. Surfaces as 409, not an infrastructure exception.
         ctx.Users.ThrowDuplicateOnAdd = true;
 
-        var handler = new RegisterCustomerHandler(ctx.Users, ctx.Sessions, ctx.Passwords, ctx.Tokens, ctx.Ids, ctx.Clock);
-        var result = await handler.Handle(
+        var auth = new AuthService(ctx.Users, ctx.Sessions, ctx.Passwords, ctx.Tokens, ctx.Ids, ctx.Clock);
+        var result = await auth.RegisterAsync(
             new RegisterCustomerCommand("race.u", "Race", "password123", null, null, null), CancellationToken.None);
 
         Assert.True(result.IsFailure);
@@ -74,13 +76,13 @@ public sealed class AuthHandlerTests
     public async Task Register_duplicate_phone_fails()
     {
         var ctx = new Ctx();
-        var handler = new RegisterCustomerHandler(ctx.Users, ctx.Sessions, ctx.Passwords, ctx.Tokens, ctx.Ids, ctx.Clock);
-        var first = await handler.Handle(
+        var auth = new AuthService(ctx.Users, ctx.Sessions, ctx.Passwords, ctx.Tokens, ctx.Ids, ctx.Clock);
+        var first = await auth.RegisterAsync(
             new RegisterCustomerCommand("u.one", "One", "password123", "+989121234567", null, null),
             CancellationToken.None);
         Assert.True(first.IsSuccess);
 
-        var second = await handler.Handle(
+        var second = await auth.RegisterAsync(
             new RegisterCustomerCommand("u.two", "Two", "password123", "+989121234567", null, null),
             CancellationToken.None);
         Assert.True(second.IsFailure);
@@ -91,14 +93,14 @@ public sealed class AuthHandlerTests
     public async Task Login_succeeds_with_username_or_phone()
     {
         var ctx = new Ctx();
-        var handler = new RegisterCustomerHandler(ctx.Users, ctx.Sessions, ctx.Passwords, ctx.Tokens, ctx.Ids, ctx.Clock);
-        await handler.Handle(
+        var auth = new AuthService(ctx.Users, ctx.Sessions, ctx.Passwords, ctx.Tokens, ctx.Ids, ctx.Clock);
+        await auth.RegisterAsync(
             new RegisterCustomerCommand("sara.m", "Sara", "password123", "+989121234567", null, null),
             CancellationToken.None);
 
-        var login = new LoginHandler(ctx.Users, ctx.Sessions, ctx.Passwords, ctx.Tokens, ctx.Ids, ctx.Clock);
-        var byName = await login.Handle(new LoginCommand("SARA.M", "password123", null, null), CancellationToken.None);
-        var byPhone = await login.Handle(new LoginCommand("+989121234567", "password123", null, null), CancellationToken.None);
+        var login = new AuthService(ctx.Users, ctx.Sessions, ctx.Passwords, ctx.Tokens, ctx.Ids, ctx.Clock);
+        var byName = await login.LoginAsync(new LoginCommand("SARA.M", "password123", null, null), CancellationToken.None);
+        var byPhone = await login.LoginAsync(new LoginCommand("+989121234567", "password123", null, null), CancellationToken.None);
 
         Assert.True(byName.IsSuccess);
         Assert.True(byPhone.IsSuccess);
@@ -110,9 +112,9 @@ public sealed class AuthHandlerTests
         var ctx = new Ctx();
         await RegisterAsync(ctx);
 
-        var login = new LoginHandler(ctx.Users, ctx.Sessions, ctx.Passwords, ctx.Tokens, ctx.Ids, ctx.Clock);
-        var unknown = await login.Handle(new LoginCommand("nobody", "password123", null, null), CancellationToken.None);
-        var wrong = await login.Handle(new LoginCommand("sara.m", "wrong-pass", null, null), CancellationToken.None);
+        var login = new AuthService(ctx.Users, ctx.Sessions, ctx.Passwords, ctx.Tokens, ctx.Ids, ctx.Clock);
+        var unknown = await login.LoginAsync(new LoginCommand("nobody", "password123", null, null), CancellationToken.None);
+        var wrong = await login.LoginAsync(new LoginCommand("sara.m", "wrong-pass", null, null), CancellationToken.None);
 
         Assert.True(unknown.IsFailure);
         Assert.True(wrong.IsFailure);
@@ -129,8 +131,8 @@ public sealed class AuthHandlerTests
         stored!.Deactivate(Now);
         await ctx.Users.UpdateAsync(stored, CancellationToken.None);
 
-        var login = new LoginHandler(ctx.Users, ctx.Sessions, ctx.Passwords, ctx.Tokens, ctx.Ids, ctx.Clock);
-        var result = await login.Handle(new LoginCommand("sara.m", "password123", null, null), CancellationToken.None);
+        var login = new AuthService(ctx.Users, ctx.Sessions, ctx.Passwords, ctx.Tokens, ctx.Ids, ctx.Clock);
+        var result = await login.LoginAsync(new LoginCommand("sara.m", "password123", null, null), CancellationToken.None);
         Assert.True(result.IsFailure);
         Assert.Equal(AuthErrors.AccountInactive, result.Error);
     }
@@ -141,8 +143,8 @@ public sealed class AuthHandlerTests
         var ctx = new Ctx();
         var auth = await RegisterAsync(ctx);
 
-        var refresh = new RefreshSessionHandler(ctx.Users, ctx.Sessions, ctx.Tokens, ctx.Clock);
-        var rotated = await refresh.Handle(new RefreshSessionCommand(auth.RefreshToken, null), CancellationToken.None);
+        var refresher = new AuthService(ctx.Users, ctx.Sessions, ctx.Passwords, ctx.Tokens, ctx.Ids, ctx.Clock);
+        var rotated = await refresher.RefreshAsync(new RefreshSessionCommand(auth.RefreshToken, null), CancellationToken.None);
 
         Assert.True(rotated.IsSuccess);
         Assert.NotEqual(auth.RefreshToken, rotated.Value!.RefreshToken);
@@ -159,17 +161,17 @@ public sealed class AuthHandlerTests
         var ctx = new Ctx();
         var auth = await RegisterAsync(ctx);
 
-        var refresh = new RefreshSessionHandler(ctx.Users, ctx.Sessions, ctx.Tokens, ctx.Clock);
-        var rotated = await refresh.Handle(new RefreshSessionCommand(auth.RefreshToken, null), CancellationToken.None);
+        var refresher = new AuthService(ctx.Users, ctx.Sessions, ctx.Passwords, ctx.Tokens, ctx.Ids, ctx.Clock);
+        var rotated = await refresher.RefreshAsync(new RefreshSessionCommand(auth.RefreshToken, null), CancellationToken.None);
         Assert.True(rotated.IsSuccess);
 
         // Attacker replays the stolen (rotated-out) token.
-        var replay = await refresh.Handle(new RefreshSessionCommand(auth.RefreshToken, null), CancellationToken.None);
+        var replay = await refresher.RefreshAsync(new RefreshSessionCommand(auth.RefreshToken, null), CancellationToken.None);
         Assert.True(replay.IsFailure);
         Assert.Equal(AuthErrors.ReuseDetected, replay.Error);
 
         // Even the legitimate latest token is now dead.
-        var latest = await refresh.Handle(
+        var latest = await refresher.RefreshAsync(
             new RefreshSessionCommand(rotated.Value!.RefreshToken, null), CancellationToken.None);
         Assert.True(latest.IsFailure);
     }
@@ -183,8 +185,8 @@ public sealed class AuthHandlerTests
         // A concurrent rotation committed first: our compare-and-swap loses.
         // Contention is not theft — no sessions are revoked.
         ctx.Sessions.FailRotate = true;
-        var refresh = new RefreshSessionHandler(ctx.Users, ctx.Sessions, ctx.Tokens, ctx.Clock);
-        var lost = await refresh.Handle(new RefreshSessionCommand(auth.RefreshToken, null), CancellationToken.None);
+        var refresher = new AuthService(ctx.Users, ctx.Sessions, ctx.Passwords, ctx.Tokens, ctx.Ids, ctx.Clock);
+        var lost = await refresher.RefreshAsync(new RefreshSessionCommand(auth.RefreshToken, null), CancellationToken.None);
 
         Assert.True(lost.IsFailure);
         Assert.Equal(AuthErrors.InvalidRefreshToken, lost.Error);
@@ -197,8 +199,8 @@ public sealed class AuthHandlerTests
     public async Task Refresh_unknown_token_fails()
     {
         var ctx = new Ctx();
-        var refresh = new RefreshSessionHandler(ctx.Users, ctx.Sessions, ctx.Tokens, ctx.Clock);
-        var result = await refresh.Handle(new RefreshSessionCommand("bogus", null), CancellationToken.None);
+        var refresher = new AuthService(ctx.Users, ctx.Sessions, ctx.Passwords, ctx.Tokens, ctx.Ids, ctx.Clock);
+        var result = await refresher.RefreshAsync(new RefreshSessionCommand("bogus", null), CancellationToken.None);
         Assert.True(result.IsFailure);
         Assert.Equal(AuthErrors.InvalidRefreshToken, result.Error);
     }
@@ -208,14 +210,15 @@ public sealed class AuthHandlerTests
     {
         var ctx = new Ctx();
         var auth = await RegisterAsync(ctx);
-        var login = new LoginHandler(ctx.Users, ctx.Sessions, ctx.Passwords, ctx.Tokens, ctx.Ids, ctx.Clock);
-        var second = await login.Handle(new LoginCommand("sara.m", "password123", "mobile", null), CancellationToken.None);
+        var login = new AuthService(ctx.Users, ctx.Sessions, ctx.Passwords, ctx.Tokens, ctx.Ids, ctx.Clock);
+        var second = await login.LoginAsync(new LoginCommand("sara.m", "password123", "mobile", null), CancellationToken.None);
         Assert.True(second.IsSuccess);
 
-        var changer = new ChangePasswordHandler(
-            ctx.Users, ctx.Sessions, ctx.Passwords, ctx.Clock,
-            new FakeCurrentUser(auth.User.Id, sessionId: auth.SessionId));
-        var changed = await changer.Handle(new ChangePasswordCommand("password123", "new-password-1"), CancellationToken.None);
+        var changer = new AuthService(ctx.Users, ctx.Sessions, ctx.Passwords, ctx.Tokens, ctx.Ids, ctx.Clock);
+        var changed = await changer.ChangePasswordAsync(
+            new ChangePasswordCommand("password123", "new-password-1"),
+            new CallerContext(auth.User.Id, auth.SessionId, []),
+            CancellationToken.None);
         Assert.True(changed.IsSuccess);
 
         var sessions = await ctx.Sessions.ListByUserAsync(auth.User.Id, 100, CancellationToken.None);
@@ -223,9 +226,9 @@ public sealed class AuthHandlerTests
         Assert.Contains(sessions, s => s.Id == second.Value!.SessionId && s.IsRevoked);
 
         // Old password dead, new password works.
-        var retry = await login.Handle(new LoginCommand("sara.m", "password123", null, null), CancellationToken.None);
+        var retry = await login.LoginAsync(new LoginCommand("sara.m", "password123", null, null), CancellationToken.None);
         Assert.True(retry.IsFailure);
-        var fresh = await login.Handle(new LoginCommand("sara.m", "new-password-1", null, null), CancellationToken.None);
+        var fresh = await login.LoginAsync(new LoginCommand("sara.m", "new-password-1", null, null), CancellationToken.None);
         Assert.True(fresh.IsSuccess);
     }
 }

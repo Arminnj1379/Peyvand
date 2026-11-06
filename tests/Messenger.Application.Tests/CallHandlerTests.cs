@@ -1,5 +1,7 @@
 using Messenger.Application.Calls;
 using Messenger.Application.Features.Chats;
+using Messenger.Application.Services;
+using Messenger.Application.Services.Implementations;
 using Messenger.Domain.Calls;
 using Messenger.Domain.Chats;
 using Messenger.Domain.Users;
@@ -31,8 +33,8 @@ public sealed class CallHandlerTests
 
         public async Task<Chat> SeedDmAsync(User a, User b)
         {
-            var handler = new CreateDmHandler(Chats, Users, Ids, Clock, new FakeCurrentUser(a.Id));
-            var result = await handler.Handle(new CreateDmCommand(b.Id), CancellationToken.None);
+            var svc = new ConversationService(Chats, Users, Ids, Clock);
+            var result = await svc.CreateDmAsync(new CreateDmCommand(b.Id), new CallerContext(a.Id, null, []), CancellationToken.None);
             Assert.True(result.IsSuccess);
             return (await Chats.GetByIdAsync(result.Value!.Id, CancellationToken.None))!;
         }
@@ -41,20 +43,20 @@ public sealed class CallHandlerTests
         {
             var ids = new List<string> { owner.Id };
             ids.AddRange(members.Select(m => m.Id));
-            var handler = new CreateGroupHandler(Chats, Users, Ids, Clock, new FakeCurrentUser(owner.Id));
-            var result = await handler.Handle(
-                new CreateGroupCommand("Team", ids, null), CancellationToken.None);
+            var svc = new ConversationService(Chats, Users, Ids, Clock);
+            var result = await svc.CreateGroupAsync(
+                new CreateGroupCommand("Team", ids, null), new CallerContext(owner.Id, null, []), CancellationToken.None);
             Assert.True(result.IsSuccess);
             return (await Chats.GetByIdAsync(result.Value!.Id, CancellationToken.None))!;
         }
 
-        public FakeCurrentUser As(User user) => new(user.Id);
+        public CallerContext As(User user) => new(user.Id, null, []);
     }
 
     private static Task<CallDto> StartAsync(Ctx ctx, Chat chat, User user, string media = "Video")
     {
-        var handler = new StartCallHandler(ctx.Chats, ctx.Calls, ctx.Ids, ctx.Clock, ctx.As(user));
-        return AssertOk(handler.Handle(new StartCallCommand(chat.Id, media), CancellationToken.None));
+        var svc = new CallService(ctx.Chats, ctx.Calls, ctx.Users, ctx.LiveKit, ctx.Ids, ctx.Clock);
+        return AssertOk(svc.StartCallAsync(new StartCallCommand(chat.Id, media), ctx.As(user), CancellationToken.None));
     }
 
     private static async Task<T> AssertOk<T>(Task<Domain.Common.Result<T>> task)
@@ -89,8 +91,8 @@ public sealed class CallHandlerTests
         var chat = await ctx.SeedDmAsync(a, b);
         await StartAsync(ctx, chat, a);
 
-        var handler = new StartCallHandler(ctx.Chats, ctx.Calls, ctx.Ids, ctx.Clock, ctx.As(b));
-        var result = await handler.Handle(new StartCallCommand(chat.Id, "Audio"), CancellationToken.None);
+        var svc = new CallService(ctx.Chats, ctx.Calls, ctx.Users, ctx.LiveKit, ctx.Ids, ctx.Clock);
+        var result = await svc.StartCallAsync(new StartCallCommand(chat.Id, "Audio"), ctx.As(b), CancellationToken.None);
 
         Assert.True(result.IsFailure);
         Assert.Equal(CallErrors.AlreadyActive, result.Error);
@@ -107,8 +109,8 @@ public sealed class CallHandlerTests
         // concurrent winner owns the ring.
         ctx.Calls.ThrowOnAdd = true;
 
-        var handler = new StartCallHandler(ctx.Chats, ctx.Calls, ctx.Ids, ctx.Clock, ctx.As(a));
-        var result = await handler.Handle(new StartCallCommand(chat.Id, "Audio"), CancellationToken.None);
+        var svc = new CallService(ctx.Chats, ctx.Calls, ctx.Users, ctx.LiveKit, ctx.Ids, ctx.Clock);
+        var result = await svc.StartCallAsync(new StartCallCommand(chat.Id, "Audio"), ctx.As(a), CancellationToken.None);
 
         Assert.True(result.IsFailure);
         Assert.Equal(CallErrors.AlreadyActive, result.Error);
@@ -123,8 +125,8 @@ public sealed class CallHandlerTests
         var outsider = await ctx.SeedUserAsync("priv.out");
         var chat = await ctx.SeedDmAsync(a, b);
 
-        var handler = new StartCallHandler(ctx.Chats, ctx.Calls, ctx.Ids, ctx.Clock, ctx.As(outsider));
-        var result = await handler.Handle(new StartCallCommand(chat.Id, "Video"), CancellationToken.None);
+        var svc = new CallService(ctx.Chats, ctx.Calls, ctx.Users, ctx.LiveKit, ctx.Ids, ctx.Clock);
+        var result = await svc.StartCallAsync(new StartCallCommand(chat.Id, "Video"), ctx.As(outsider), CancellationToken.None);
 
         Assert.True(result.IsFailure);
         Assert.Equal(CallErrors.CannotStart, result.Error);
@@ -136,15 +138,15 @@ public sealed class CallHandlerTests
         var ctx = new Ctx();
         var owner = await ctx.SeedUserAsync("ch.owner");
         var sub = await ctx.SeedUserAsync("ch.subuser");
-        var handler = new Features.Chats.CreateChannelHandler(
-            ctx.Chats, ctx.Users, ctx.Ids, ctx.Clock, ctx.As(owner));
-        var created = await handler.Handle(
-            new CreateChannelCommand("News", null, [sub.Id], false, null), CancellationToken.None);
+        var conversations = new ConversationService(
+            ctx.Chats, ctx.Users, ctx.Ids, ctx.Clock);
+        var created = await conversations.CreateChannelAsync(
+            new CreateChannelCommand("News", null, [sub.Id], false, null), ctx.As(owner), CancellationToken.None);
         Assert.True(created.IsSuccess);
         var chat = (await ctx.Chats.GetByIdAsync(created.Value!.Id, CancellationToken.None))!;
 
-        var denied = await new StartCallHandler(ctx.Chats, ctx.Calls, ctx.Ids, ctx.Clock, ctx.As(sub))
-            .Handle(new StartCallCommand(chat.Id, "Audio"), CancellationToken.None);
+        var calls = new CallService(ctx.Chats, ctx.Calls, ctx.Users, ctx.LiveKit, ctx.Ids, ctx.Clock);
+        var denied = await calls.StartCallAsync(new StartCallCommand(chat.Id, "Audio"), ctx.As(sub), CancellationToken.None);
         Assert.True(denied.IsFailure);
         Assert.Equal(CallErrors.CannotStart, denied.Error);
 
@@ -161,19 +163,17 @@ public sealed class CallHandlerTests
         var chat = await ctx.SeedDmAsync(a, b);
         var call = await StartAsync(ctx, chat, a);
 
-        var accepted = await AssertOk(new AcceptCallHandler(ctx.Chats, ctx.Calls, ctx.Clock, ctx.As(b))
-            .Handle(new AcceptCallCommand(call.Id), CancellationToken.None));
+        var accepted = await AssertOk(new CallService(ctx.Chats, ctx.Calls, ctx.Users, ctx.LiveKit, ctx.Ids, ctx.Clock)
+            .AcceptCallAsync(new AcceptCallCommand(call.Id), ctx.As(b), CancellationToken.None));
         Assert.Equal("Accepted", accepted.Participants.Single(p => p.UserId == b.Id).Status);
 
-        var initiator = await new JoinCallHandler(
-                ctx.Chats, ctx.Calls, ctx.Users, ctx.LiveKit, ctx.Clock, ctx.As(a))
-            .Handle(new JoinCallCommand(call.Id), CancellationToken.None);
+        var initiator = await new CallService(ctx.Chats, ctx.Calls, ctx.Users, ctx.LiveKit, ctx.Ids, ctx.Clock)
+            .JoinCallAsync(new JoinCallCommand(call.Id), ctx.As(a), CancellationToken.None);
         Assert.True(initiator.IsSuccess);
         Assert.Equal("Active", initiator.Value!.Call.Status);
 
-        var joined = await new JoinCallHandler(
-                ctx.Chats, ctx.Calls, ctx.Users, ctx.LiveKit, ctx.Clock, ctx.As(b))
-            .Handle(new JoinCallCommand(call.Id), CancellationToken.None);
+        var joined = await new CallService(ctx.Chats, ctx.Calls, ctx.Users, ctx.LiveKit, ctx.Ids, ctx.Clock)
+            .JoinCallAsync(new JoinCallCommand(call.Id), ctx.As(b), CancellationToken.None);
         Assert.True(joined.IsSuccess);
         Assert.Equal("Active", joined.Value!.Call.Status);
         Assert.Equal("wss://livekit.test", joined.Value.Url);
@@ -181,14 +181,14 @@ public sealed class CallHandlerTests
         Assert.Single(ctx.LiveKit.Issued.Where(i => i.Identity == b.Id));
 
         // Callee leaves: call stays live while the initiator remains joined.
-        var left = await AssertOk(new LeaveCallHandler(ctx.Chats, ctx.Calls, ctx.Clock, ctx.As(b))
-            .Handle(new LeaveCallCommand(call.Id), CancellationToken.None));
+        var left = await AssertOk(new CallService(ctx.Chats, ctx.Calls, ctx.Users, ctx.LiveKit, ctx.Ids, ctx.Clock)
+            .LeaveCallAsync(new LeaveCallCommand(call.Id), ctx.As(b), CancellationToken.None));
         Assert.Equal("Active", left.Status);
         Assert.False(left.Participants.Single(p => p.UserId == b.Id).IsJoined);
 
         // Last one out ends it for everyone.
-        var end = await AssertOk(new LeaveCallHandler(ctx.Chats, ctx.Calls, ctx.Clock, ctx.As(a))
-            .Handle(new LeaveCallCommand(call.Id), CancellationToken.None));
+        var end = await AssertOk(new CallService(ctx.Chats, ctx.Calls, ctx.Users, ctx.LiveKit, ctx.Ids, ctx.Clock)
+            .LeaveCallAsync(new LeaveCallCommand(call.Id), ctx.As(a), CancellationToken.None));
         Assert.Equal("Ended", end.Status);
         Assert.Equal("Completed", end.EndReason);
     }
@@ -202,8 +202,8 @@ public sealed class CallHandlerTests
         var chat = await ctx.SeedDmAsync(a, b);
         var call = await StartAsync(ctx, chat, a);
 
-        var rejected = await AssertOk(new RejectCallHandler(ctx.Chats, ctx.Calls, ctx.Clock, ctx.As(b))
-            .Handle(new RejectCallCommand(call.Id), CancellationToken.None));
+        var rejected = await AssertOk(new CallService(ctx.Chats, ctx.Calls, ctx.Users, ctx.LiveKit, ctx.Ids, ctx.Clock)
+            .RejectCallAsync(new RejectCallCommand(call.Id), ctx.As(b), CancellationToken.None));
 
         Assert.Equal("Ended", rejected.Status);
         Assert.Equal("Declined", rejected.EndReason);
@@ -219,8 +219,8 @@ public sealed class CallHandlerTests
         var chat = await ctx.SeedGroupAsync(a, b, c);
         var call = await StartAsync(ctx, chat, a);
 
-        var rejected = await AssertOk(new RejectCallHandler(ctx.Chats, ctx.Calls, ctx.Clock, ctx.As(b))
-            .Handle(new RejectCallCommand(call.Id), CancellationToken.None));
+        var rejected = await AssertOk(new CallService(ctx.Chats, ctx.Calls, ctx.Users, ctx.LiveKit, ctx.Ids, ctx.Clock)
+            .RejectCallAsync(new RejectCallCommand(call.Id), ctx.As(b), CancellationToken.None));
 
         Assert.Equal("Ringing", rejected.Status);
         Assert.Equal("Rejected", rejected.Participants.Single(p => p.UserId == b.Id).Status);
@@ -236,9 +236,8 @@ public sealed class CallHandlerTests
         var chat = await ctx.SeedDmAsync(a, b);
         var call = await StartAsync(ctx, chat, a);
 
-        var result = await new JoinCallHandler(
-                ctx.Chats, ctx.Calls, ctx.Users, ctx.LiveKit, ctx.Clock, ctx.As(b))
-            .Handle(new JoinCallCommand(call.Id), CancellationToken.None);
+        var result = await new CallService(ctx.Chats, ctx.Calls, ctx.Users, ctx.LiveKit, ctx.Ids, ctx.Clock)
+            .JoinCallAsync(new JoinCallCommand(call.Id), ctx.As(b), CancellationToken.None);
 
         Assert.True(result.IsFailure);
         Assert.Equal(CallErrors.LiveKitNotConfigured, result.Error);
@@ -259,8 +258,8 @@ public sealed class CallHandlerTests
         var dmCall = await StartAsync(ctx, dm, a);
 
         // Either DM party may hang up.
-        var dmEnd = await AssertOk(new EndCallHandler(ctx.Chats, ctx.Calls, ctx.Clock, ctx.As(b))
-            .Handle(new EndCallCommand(dmCall.Id), CancellationToken.None));
+        var dmEnd = await AssertOk(new CallService(ctx.Chats, ctx.Calls, ctx.Users, ctx.LiveKit, ctx.Ids, ctx.Clock)
+            .EndCallAsync(new EndCallCommand(dmCall.Id), ctx.As(b), CancellationToken.None));
         Assert.Equal("Ended", dmEnd.Status);
         Assert.Equal("Cancelled", dmEnd.EndReason); // never went active.
 
@@ -268,14 +267,14 @@ public sealed class CallHandlerTests
         var groupCall = await StartAsync(ctx, group, a);
 
         // Plain member cannot end a group call for everyone.
-        var denied = await new EndCallHandler(ctx.Chats, ctx.Calls, ctx.Clock, ctx.As(c))
-            .Handle(new EndCallCommand(groupCall.Id), CancellationToken.None);
+        var denied = await new CallService(ctx.Chats, ctx.Calls, ctx.Users, ctx.LiveKit, ctx.Ids, ctx.Clock)
+            .EndCallAsync(new EndCallCommand(groupCall.Id), ctx.As(c), CancellationToken.None);
         Assert.True(denied.IsFailure);
         Assert.Equal(CallErrors.NotInitiator, denied.Error);
 
         // Initiator can.
-        var ended = await AssertOk(new EndCallHandler(ctx.Chats, ctx.Calls, ctx.Clock, ctx.As(a))
-            .Handle(new EndCallCommand(groupCall.Id), CancellationToken.None));
+        var ended = await AssertOk(new CallService(ctx.Chats, ctx.Calls, ctx.Users, ctx.LiveKit, ctx.Ids, ctx.Clock)
+            .EndCallAsync(new EndCallCommand(groupCall.Id), ctx.As(a), CancellationToken.None));
         Assert.Equal("Ended", ended.Status);
     }
 
@@ -288,18 +287,18 @@ public sealed class CallHandlerTests
         var outsider = await ctx.SeedUserAsync("hist.out");
         var chat = await ctx.SeedDmAsync(a, b);
         var first = await StartAsync(ctx, chat, a);
-        await AssertOk(new EndCallHandler(ctx.Chats, ctx.Calls, ctx.Clock, ctx.As(a))
-            .Handle(new EndCallCommand(first.Id), CancellationToken.None));
+        await AssertOk(new CallService(ctx.Chats, ctx.Calls, ctx.Users, ctx.LiveKit, ctx.Ids, ctx.Clock)
+            .EndCallAsync(new EndCallCommand(first.Id), ctx.As(a), CancellationToken.None));
         ctx.Clock.Now = Now.AddMinutes(5);
         await StartAsync(ctx, chat, b);
 
-        var history = await AssertOk(new ListCallsHandler(ctx.Chats, ctx.Calls, ctx.As(a))
-            .Handle(new ListCallsQuery(chat.Id, 10), CancellationToken.None));
+        var history = await AssertOk(new CallService(ctx.Chats, ctx.Calls, ctx.Users, ctx.LiveKit, ctx.Ids, ctx.Clock)
+            .ListCallsAsync(new ListCallsQuery(chat.Id, 10), ctx.As(a), CancellationToken.None));
         Assert.Equal(2, history.Count);
         Assert.Equal(b.Id, history[0].InitiatorId);
 
-        var denied = await new ListCallsHandler(ctx.Chats, ctx.Calls, ctx.As(outsider))
-            .Handle(new ListCallsQuery(chat.Id, 10), CancellationToken.None);
+        var denied = await new CallService(ctx.Chats, ctx.Calls, ctx.Users, ctx.LiveKit, ctx.Ids, ctx.Clock)
+            .ListCallsAsync(new ListCallsQuery(chat.Id, 10), ctx.As(outsider), CancellationToken.None);
         Assert.True(denied.IsFailure);
         Assert.Equal(CallErrors.Forbidden, denied.Error);
     }

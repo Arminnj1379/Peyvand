@@ -1,6 +1,8 @@
 using Messenger.Application.Features.Chats;
 using Messenger.Application.Features.Messages;
 using Messenger.Application.Messaging;
+using Messenger.Application.Services;
+using Messenger.Application.Services.Implementations;
 using Messenger.Domain.Chats;
 using Messenger.Domain.Messages;
 using Messenger.Domain.Users;
@@ -35,34 +37,34 @@ public sealed class MessageAuthzTests
             return registered.Value!;
         }
 
-        public FakeCurrentUser As(User user) => new(user.Id);
+        public CallerContext As(User user) => new(user.Id, null, []);
     }
 
     private static async Task<Chat> SeedGroupAsync(Ctx ctx, User owner, params User[] members)
     {
         var ids = new List<string> { owner.Id };
         ids.AddRange(members.Select(m => m.Id));
-        var handler = new CreateGroupHandler(ctx.Chats, ctx.Users, ctx.Ids, ctx.Clock, ctx.As(owner));
-        var result = await handler.Handle(
-            new CreateGroupCommand("Team", ids, null), CancellationToken.None);
+        var svc = new ConversationService(ctx.Chats, ctx.Users, ctx.Ids, ctx.Clock);
+        var result = await svc.CreateGroupAsync(
+            new CreateGroupCommand("Team", ids, null), ctx.As(owner), CancellationToken.None);
         Assert.True(result.IsSuccess);
         return (await ctx.Chats.GetByIdAsync(result.Value!.Id, CancellationToken.None))!;
     }
 
     private static async Task<Chat> SeedChannelAsync(Ctx ctx, User owner, params User[] subs)
     {
-        var handler = new CreateChannelHandler(ctx.Chats, ctx.Users, ctx.Ids, ctx.Clock, ctx.As(owner));
-        var result = await handler.Handle(
+        var svc = new ConversationService(ctx.Chats, ctx.Users, ctx.Ids, ctx.Clock);
+        var result = await svc.CreateChannelAsync(
             new CreateChannelCommand("News", null, subs.Select(s => s.Id).ToList(), false, null),
-            CancellationToken.None);
+            ctx.As(owner), CancellationToken.None);
         Assert.True(result.IsSuccess);
         return (await ctx.Chats.GetByIdAsync(result.Value!.Id, CancellationToken.None))!;
     }
 
     private static async Task<Chat> SeedDmAsync(Ctx ctx, User a, User b)
     {
-        var handler = new CreateDmHandler(ctx.Chats, ctx.Users, ctx.Ids, ctx.Clock, ctx.As(a));
-        var result = await handler.Handle(new CreateDmCommand(b.Id), CancellationToken.None);
+        var svc = new ConversationService(ctx.Chats, ctx.Users, ctx.Ids, ctx.Clock);
+        var result = await svc.CreateDmAsync(new CreateDmCommand(b.Id), ctx.As(a), CancellationToken.None);
         Assert.True(result.IsSuccess);
         return (await ctx.Chats.GetByIdAsync(result.Value!.Id, CancellationToken.None))!;
     }
@@ -70,10 +72,10 @@ public sealed class MessageAuthzTests
     private static async Task<MessageDto> SendAsync(
         Ctx ctx, User sender, string chatId, string body, string clientId, string? replyTo = null)
     {
-        var handler = new SendMessageHandler(
-            ctx.Chats, ctx.Messages, ctx.Files, ctx.Users, ctx.Ids, ctx.Clock, ctx.As(sender));
-        var result = await handler.Handle(
-            new SendMessageCommand(chatId, body, clientId, replyTo), CancellationToken.None);
+        var svc = new MessageService(
+            ctx.Chats, ctx.Messages, ctx.Files, ctx.Users, ctx.Ids, ctx.Clock);
+        var result = await svc.SendMessageAsync(
+            new SendMessageCommand(chatId, body, clientId, replyTo), ctx.As(sender), CancellationToken.None);
         Assert.True(result.IsSuccess);
         return result.Value!;
     }
@@ -86,12 +88,12 @@ public sealed class MessageAuthzTests
         var chat = await SeedGroupAsync(ctx, a, await ctx.SeedUserAsync("e1.b"));
         var sent = await SendAsync(ctx, a, chat.Id, "original", "k-1");
 
-        var deleted = await new DeleteMessageHandler(ctx.Chats, ctx.Messages, ctx.Files, ctx.Users, ctx.Clock, ctx.As(a))
-            .Handle(new DeleteMessageCommand(sent.Id), CancellationToken.None);
+        var deleted = await new MessageService(ctx.Chats, ctx.Messages, ctx.Files, ctx.Users, ctx.Ids, ctx.Clock)
+            .DeleteMessageAsync(new DeleteMessageCommand(sent.Id), ctx.As(a), CancellationToken.None);
         Assert.True(deleted.IsSuccess);
 
-        var edit = await new EditMessageHandler(ctx.Chats, ctx.Messages, ctx.Files, ctx.Users, ctx.Clock, ctx.As(a))
-            .Handle(new EditMessageCommand(sent.Id, "resurrect"), CancellationToken.None);
+        var edit = await new MessageService(ctx.Chats, ctx.Messages, ctx.Files, ctx.Users, ctx.Ids, ctx.Clock)
+            .EditMessageAsync(new EditMessageCommand(sent.Id, "resurrect"), ctx.As(a), CancellationToken.None);
         Assert.True(edit.IsFailure);
         // Deleted messages read back as not-found (no existence leak).
         Assert.Equal(MessageErrors.NotFound, edit.Error);
@@ -105,8 +107,8 @@ public sealed class MessageAuthzTests
         var chat = await SeedGroupAsync(ctx, a, await ctx.SeedUserAsync("e2.b"));
         var sent = await SendAsync(ctx, a, chat.Id, "original", "k-1");
 
-        var edit = await new EditMessageHandler(ctx.Chats, ctx.Messages, ctx.Files, ctx.Users, ctx.Clock, ctx.As(a))
-            .Handle(new EditMessageCommand(sent.Id, "   "), CancellationToken.None);
+        var edit = await new MessageService(ctx.Chats, ctx.Messages, ctx.Files, ctx.Users, ctx.Ids, ctx.Clock)
+            .EditMessageAsync(new EditMessageCommand(sent.Id, "   "), ctx.As(a), CancellationToken.None);
         Assert.True(edit.IsFailure);
         Assert.Equal(MessageErrors.InvalidBody, edit.Error);
     }
@@ -120,9 +122,9 @@ public sealed class MessageAuthzTests
         var chat = await SeedGroupAsync(ctx, a, await ctx.SeedUserAsync("e3.b"));
         var sent = await SendAsync(ctx, a, chat.Id, "original", "k-1");
 
-        var edit = await new EditMessageHandler(
-                ctx.Chats, ctx.Messages, ctx.Files, ctx.Users, ctx.Clock, ctx.As(outsider))
-            .Handle(new EditMessageCommand(sent.Id, "hijack"), CancellationToken.None);
+        var edit = await new MessageService(
+                ctx.Chats, ctx.Messages, ctx.Files, ctx.Users, ctx.Ids, ctx.Clock)
+            .EditMessageAsync(new EditMessageCommand(sent.Id, "hijack"), ctx.As(outsider), CancellationToken.None);
         Assert.True(edit.IsFailure);
         // Ownership is checked before membership, so a non-sender outsider
         // deterministically sees NotSender (never a membership leak).
@@ -138,13 +140,13 @@ public sealed class MessageAuthzTests
         var chat = await SeedGroupAsync(ctx, a, b);
         var sent = await SendAsync(ctx, a, chat.Id, "original", "k-1");
 
-        var deleted = await new DeleteMessageHandler(ctx.Chats, ctx.Messages, ctx.Files, ctx.Users, ctx.Clock, ctx.As(a))
-            .Handle(new DeleteMessageCommand(sent.Id), CancellationToken.None);
+        var deleted = await new MessageService(ctx.Chats, ctx.Messages, ctx.Files, ctx.Users, ctx.Ids, ctx.Clock)
+            .DeleteMessageAsync(new DeleteMessageCommand(sent.Id), ctx.As(a), CancellationToken.None);
         Assert.True(deleted.IsSuccess);
 
-        var reply = await new SendMessageHandler(
-                ctx.Chats, ctx.Messages, ctx.Files, ctx.Users, ctx.Ids, ctx.Clock, ctx.As(b))
-            .Handle(new SendMessageCommand(chat.Id, "reply", "k-2", sent.Id), CancellationToken.None);
+        var reply = await new MessageService(
+                ctx.Chats, ctx.Messages, ctx.Files, ctx.Users, ctx.Ids, ctx.Clock)
+            .SendMessageAsync(new SendMessageCommand(chat.Id, "reply", "k-2", sent.Id), ctx.As(b), CancellationToken.None);
         Assert.True(reply.IsFailure);
         Assert.Equal(MessageErrors.ReplyTargetNotFound, reply.Error);
     }
@@ -157,13 +159,13 @@ public sealed class MessageAuthzTests
         var chat = await SeedGroupAsync(ctx, a, await ctx.SeedUserAsync("d1.b"));
         var sent = await SendAsync(ctx, a, chat.Id, "bye", "k-1");
 
-        var first = await new DeleteMessageHandler(ctx.Chats, ctx.Messages, ctx.Files, ctx.Users, ctx.Clock, ctx.As(a))
-            .Handle(new DeleteMessageCommand(sent.Id), CancellationToken.None);
+        var first = await new MessageService(ctx.Chats, ctx.Messages, ctx.Files, ctx.Users, ctx.Ids, ctx.Clock)
+            .DeleteMessageAsync(new DeleteMessageCommand(sent.Id), ctx.As(a), CancellationToken.None);
         Assert.True(first.IsSuccess);
         Assert.True(first.Value!.IsDeleted);
 
-        var second = await new DeleteMessageHandler(ctx.Chats, ctx.Messages, ctx.Files, ctx.Users, ctx.Clock, ctx.As(a))
-            .Handle(new DeleteMessageCommand(sent.Id), CancellationToken.None);
+        var second = await new MessageService(ctx.Chats, ctx.Messages, ctx.Files, ctx.Users, ctx.Ids, ctx.Clock)
+            .DeleteMessageAsync(new DeleteMessageCommand(sent.Id), ctx.As(a), CancellationToken.None);
         Assert.True(second.IsFailure);
         Assert.Equal(MessageErrors.NotFound, second.Error);
     }
@@ -177,9 +179,9 @@ public sealed class MessageAuthzTests
         var chat = await SeedGroupAsync(ctx, a, await ctx.SeedUserAsync("d2.b"));
         var sent = await SendAsync(ctx, a, chat.Id, "mine", "k-1");
 
-        var result = await new DeleteMessageHandler(
-                ctx.Chats, ctx.Messages, ctx.Files, ctx.Users, ctx.Clock, ctx.As(outsider))
-            .Handle(new DeleteMessageCommand(sent.Id), CancellationToken.None);
+        var result = await new MessageService(
+                ctx.Chats, ctx.Messages, ctx.Files, ctx.Users, ctx.Ids, ctx.Clock)
+            .DeleteMessageAsync(new DeleteMessageCommand(sent.Id), ctx.As(outsider), CancellationToken.None);
         Assert.True(result.IsFailure);
         Assert.Equal(ChatErrors.Forbidden, result.Error);
     }
@@ -193,12 +195,12 @@ public sealed class MessageAuthzTests
         var chat = await SeedGroupAsync(ctx, a, b);
         var sent = await SendAsync(ctx, a, chat.Id, "hello", "k-1");
 
-        var deleted = await new DeleteMessageHandler(ctx.Chats, ctx.Messages, ctx.Files, ctx.Users, ctx.Clock, ctx.As(a))
-            .Handle(new DeleteMessageCommand(sent.Id), CancellationToken.None);
+        var deleted = await new MessageService(ctx.Chats, ctx.Messages, ctx.Files, ctx.Users, ctx.Ids, ctx.Clock)
+            .DeleteMessageAsync(new DeleteMessageCommand(sent.Id), ctx.As(a), CancellationToken.None);
         Assert.True(deleted.IsSuccess);
 
-        var react = await new ToggleReactionHandler(ctx.Chats, ctx.Messages, ctx.Files, ctx.Users, ctx.Clock, ctx.As(b))
-            .Handle(new ToggleReactionCommand(sent.Id, "👍"), CancellationToken.None);
+        var react = await new MessageService(ctx.Chats, ctx.Messages, ctx.Files, ctx.Users, ctx.Ids, ctx.Clock)
+            .ToggleReactionAsync(new ToggleReactionCommand(sent.Id, "👍"), ctx.As(b), CancellationToken.None);
         Assert.True(react.IsFailure);
         Assert.Equal(MessageErrors.NotFound, react.Error);
     }
@@ -212,9 +214,9 @@ public sealed class MessageAuthzTests
         var chat = await SeedGroupAsync(ctx, a, await ctx.SeedUserAsync("r2.b"));
         var sent = await SendAsync(ctx, a, chat.Id, "hello", "k-1");
 
-        var react = await new ToggleReactionHandler(
-                ctx.Chats, ctx.Messages, ctx.Files, ctx.Users, ctx.Clock, ctx.As(outsider))
-            .Handle(new ToggleReactionCommand(sent.Id, "👍"), CancellationToken.None);
+        var react = await new MessageService(
+                ctx.Chats, ctx.Messages, ctx.Files, ctx.Users, ctx.Ids, ctx.Clock)
+            .ToggleReactionAsync(new ToggleReactionCommand(sent.Id, "👍"), ctx.As(outsider), CancellationToken.None);
         Assert.True(react.IsFailure);
         Assert.Equal(ChatErrors.Forbidden, react.Error);
     }
@@ -228,18 +230,18 @@ public sealed class MessageAuthzTests
         var chat = await SeedGroupAsync(ctx, owner, member);
         var sent = await SendAsync(ctx, owner, chat.Id, "announce", "k-1");
 
-        var denied = await new PinMessageHandler(ctx.Chats, ctx.Messages, ctx.Users, ctx.Clock, ctx.As(member))
-            .Handle(new PinMessageCommand(chat.Id, sent.Id), CancellationToken.None);
+        var denied = await new ChatInteractionService(ctx.Chats, ctx.Messages, ctx.Users, ctx.Clock)
+            .PinMessageAsync(new PinMessageCommand(chat.Id, sent.Id), ctx.As(member), CancellationToken.None);
         Assert.True(denied.IsFailure);
         Assert.Equal(ChatErrors.NotAdmin, denied.Error);
 
-        var ok = await new PinMessageHandler(ctx.Chats, ctx.Messages, ctx.Users, ctx.Clock, ctx.As(owner))
-            .Handle(new PinMessageCommand(chat.Id, sent.Id), CancellationToken.None);
+        var ok = await new ChatInteractionService(ctx.Chats, ctx.Messages, ctx.Users, ctx.Clock)
+            .PinMessageAsync(new PinMessageCommand(chat.Id, sent.Id), ctx.As(owner), CancellationToken.None);
         Assert.True(ok.IsSuccess);
         Assert.Contains(sent.Id, ok.Value!.PinnedMessageIds);
 
-        var unpinned = await new UnpinMessageHandler(ctx.Chats, ctx.Users, ctx.Clock, ctx.As(owner))
-            .Handle(new UnpinMessageCommand(chat.Id, sent.Id), CancellationToken.None);
+        var unpinned = await new ChatInteractionService(ctx.Chats, ctx.Messages, ctx.Users, ctx.Clock)
+            .UnpinMessageAsync(new UnpinMessageCommand(chat.Id, sent.Id), ctx.As(owner), CancellationToken.None);
         Assert.True(unpinned.IsSuccess);
         Assert.DoesNotContain(sent.Id, unpinned.Value!.PinnedMessageIds);
     }
@@ -254,19 +256,19 @@ public sealed class MessageAuthzTests
         var sent = await SendAsync(ctx, a, chat.Id, "note", "k-1");
 
         // Either DM member may pin (no admin concept in DMs).
-        var ok = await new PinMessageHandler(ctx.Chats, ctx.Messages, ctx.Users, ctx.Clock, ctx.As(b))
-            .Handle(new PinMessageCommand(chat.Id, sent.Id), CancellationToken.None);
+        var ok = await new ChatInteractionService(ctx.Chats, ctx.Messages, ctx.Users, ctx.Clock)
+            .PinMessageAsync(new PinMessageCommand(chat.Id, sent.Id), ctx.As(b), CancellationToken.None);
         Assert.True(ok.IsSuccess);
 
-        await new DeleteMessageHandler(ctx.Chats, ctx.Messages, ctx.Files, ctx.Users, ctx.Clock, ctx.As(a))
-            .Handle(new DeleteMessageCommand(sent.Id), CancellationToken.None);
+        await new MessageService(ctx.Chats, ctx.Messages, ctx.Files, ctx.Users, ctx.Ids, ctx.Clock)
+            .DeleteMessageAsync(new DeleteMessageCommand(sent.Id), ctx.As(a), CancellationToken.None);
 
         var other = await SendAsync(ctx, a, chat.Id, "other", "k-2");
-        await new DeleteMessageHandler(ctx.Chats, ctx.Messages, ctx.Files, ctx.Users, ctx.Clock, ctx.As(a))
-            .Handle(new DeleteMessageCommand(other.Id), CancellationToken.None);
+        await new MessageService(ctx.Chats, ctx.Messages, ctx.Files, ctx.Users, ctx.Ids, ctx.Clock)
+            .DeleteMessageAsync(new DeleteMessageCommand(other.Id), ctx.As(a), CancellationToken.None);
 
-        var pinDeleted = await new PinMessageHandler(ctx.Chats, ctx.Messages, ctx.Users, ctx.Clock, ctx.As(a))
-            .Handle(new PinMessageCommand(chat.Id, other.Id), CancellationToken.None);
+        var pinDeleted = await new ChatInteractionService(ctx.Chats, ctx.Messages, ctx.Users, ctx.Clock)
+            .PinMessageAsync(new PinMessageCommand(chat.Id, other.Id), ctx.As(a), CancellationToken.None);
         Assert.True(pinDeleted.IsFailure);
         Assert.Equal(MessageErrors.NotFound, pinDeleted.Error);
     }
@@ -280,12 +282,12 @@ public sealed class MessageAuthzTests
         var other = await SeedGroupAsync(ctx, a, await ctx.SeedUserAsync("f1.c"));
         var sent = await SendAsync(ctx, a, chat.Id, "gone", "k-1");
 
-        await new DeleteMessageHandler(ctx.Chats, ctx.Messages, ctx.Files, ctx.Users, ctx.Clock, ctx.As(a))
-            .Handle(new DeleteMessageCommand(sent.Id), CancellationToken.None);
+        await new MessageService(ctx.Chats, ctx.Messages, ctx.Files, ctx.Users, ctx.Ids, ctx.Clock)
+            .DeleteMessageAsync(new DeleteMessageCommand(sent.Id), ctx.As(a), CancellationToken.None);
 
-        var fwd = await new ForwardMessageHandler(
-                ctx.Chats, ctx.Messages, ctx.Files, ctx.Users, ctx.Ids, ctx.Clock, ctx.As(a))
-            .Handle(new ForwardMessageCommand(chat.Id, sent.Id, other.Id, "k-fwd"), CancellationToken.None);
+        var fwd = await new MessageService(
+                ctx.Chats, ctx.Messages, ctx.Files, ctx.Users, ctx.Ids, ctx.Clock)
+            .ForwardMessageAsync(new ForwardMessageCommand(chat.Id, sent.Id, other.Id, "k-fwd"), ctx.As(a), CancellationToken.None);
         Assert.True(fwd.IsFailure);
         Assert.Equal(MessageErrors.ForwardSourceNotFound, fwd.Error);
     }
@@ -300,9 +302,9 @@ public sealed class MessageAuthzTests
         var other = await SeedGroupAsync(ctx, a, await ctx.SeedUserAsync("f2.c"));
         var sent = await SendAsync(ctx, a, chat.Id, "hello", "k-1");
 
-        var fwd = await new ForwardMessageHandler(
-                ctx.Chats, ctx.Messages, ctx.Files, ctx.Users, ctx.Ids, ctx.Clock, ctx.As(outsider))
-            .Handle(new ForwardMessageCommand(chat.Id, sent.Id, other.Id, "k-fwd"), CancellationToken.None);
+        var fwd = await new MessageService(
+                ctx.Chats, ctx.Messages, ctx.Files, ctx.Users, ctx.Ids, ctx.Clock)
+            .ForwardMessageAsync(new ForwardMessageCommand(chat.Id, sent.Id, other.Id, "k-fwd"), ctx.As(outsider), CancellationToken.None);
         Assert.True(fwd.IsFailure);
         Assert.Equal(ChatErrors.Forbidden, fwd.Error);
     }
@@ -318,9 +320,9 @@ public sealed class MessageAuthzTests
         var sent = await SendAsync(ctx, owner, group.Id, "hello", "k-1");
 
         // Subscribers cannot post, so they cannot forward into the channel either.
-        var fwd = await new ForwardMessageHandler(
-                ctx.Chats, ctx.Messages, ctx.Files, ctx.Users, ctx.Ids, ctx.Clock, ctx.As(sub))
-            .Handle(new ForwardMessageCommand(group.Id, sent.Id, channel.Id, "k-fwd"), CancellationToken.None);
+        var fwd = await new MessageService(
+                ctx.Chats, ctx.Messages, ctx.Files, ctx.Users, ctx.Ids, ctx.Clock)
+            .ForwardMessageAsync(new ForwardMessageCommand(group.Id, sent.Id, channel.Id, "k-fwd"), ctx.As(sub), CancellationToken.None);
         Assert.True(fwd.IsFailure);
         Assert.Equal(ChatErrors.CannotPost, fwd.Error);
     }
@@ -334,12 +336,12 @@ public sealed class MessageAuthzTests
         var other = await SeedGroupAsync(ctx, a, await ctx.SeedUserAsync("f4.c"));
         var sent = await SendAsync(ctx, a, chat.Id, "hello", "k-1");
 
-        var handler = new ForwardMessageHandler(
-            ctx.Chats, ctx.Messages, ctx.Files, ctx.Users, ctx.Ids, ctx.Clock, ctx.As(a));
-        var first = await handler.Handle(
-            new ForwardMessageCommand(chat.Id, sent.Id, other.Id, "k-fwd"), CancellationToken.None);
-        var second = await handler.Handle(
-            new ForwardMessageCommand(chat.Id, sent.Id, other.Id, "k-fwd"), CancellationToken.None);
+        var svc = new MessageService(
+            ctx.Chats, ctx.Messages, ctx.Files, ctx.Users, ctx.Ids, ctx.Clock);
+        var first = await svc.ForwardMessageAsync(
+            new ForwardMessageCommand(chat.Id, sent.Id, other.Id, "k-fwd"), ctx.As(a), CancellationToken.None);
+        var second = await svc.ForwardMessageAsync(
+            new ForwardMessageCommand(chat.Id, sent.Id, other.Id, "k-fwd"), ctx.As(a), CancellationToken.None);
 
         Assert.True(first.IsSuccess);
         Assert.True(second.IsSuccess);
@@ -358,8 +360,8 @@ public sealed class MessageAuthzTests
         var foreign = await SendAsync(ctx, owner, chat.Id, "theirs", "k-2");
 
         // Member selects own + owner's message: the whole batch fails...
-        var denied = await new BulkDeleteMessagesHandler(ctx.Chats, ctx.Messages, ctx.Files, ctx.Users, ctx.Clock, ctx.As(member))
-            .Handle(new BulkDeleteMessagesCommand([own.Id, foreign.Id]), CancellationToken.None);
+        var denied = await new MessageService(ctx.Chats, ctx.Messages, ctx.Files, ctx.Users, ctx.Ids, ctx.Clock)
+            .BulkDeleteMessagesAsync(new BulkDeleteMessagesCommand([own.Id, foreign.Id]), ctx.As(member), CancellationToken.None);
         Assert.True(denied.IsFailure);
         Assert.Equal(MessageErrors.CannotDelete, denied.Error);
 

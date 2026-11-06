@@ -1,9 +1,7 @@
 using FluentValidation;
-using MediatR;
 using Messenger.Application.Abstractions;
+using Messenger.Application.Features.Files;
 using Messenger.Application.Messaging;
-using Messenger.Domain.Chats;
-using Messenger.Domain.Common;
 using Messenger.Domain.Messages;
 
 namespace Messenger.Application.Features.Messages;
@@ -164,13 +162,11 @@ internal static class MessageQueries
     }
 }
 
-public sealed record GetHistoryQuery(string ChatId, long? BeforeSeq, int Limit)
-    : IRequest<Result<HistoryPageDto>>;
+public sealed record GetHistoryQuery(string ChatId, long? BeforeSeq, int Limit);
 
-public sealed record SyncMessagesQuery(string ChatId, long AfterSeq, int Limit)
-    : IRequest<Result<IReadOnlyList<MessageDto>>>;
+public sealed record SyncMessagesQuery(string ChatId, long AfterSeq, int Limit);
 
-public sealed record ListPinnedQuery(string ChatId) : IRequest<Result<IReadOnlyList<MessageDto>>>;
+public sealed record ListPinnedQuery(string ChatId);
 
 public sealed class GetHistoryValidator : AbstractValidator<GetHistoryQuery>
 {
@@ -197,113 +193,5 @@ public sealed class ListPinnedValidator : AbstractValidator<ListPinnedQuery>
     public ListPinnedValidator()
     {
         RuleFor(x => x.ChatId).NotEmpty().MaximumLength(64);
-    }
-}
-
-public sealed class GetHistoryHandler(
-    IChatStore chats,
-    IMessageStore messages,
-    IFileStore files,
-    IUserStore users,
-    ICurrentUser currentUser) : IRequestHandler<GetHistoryQuery, Result<HistoryPageDto>>
-{
-    public async Task<Result<HistoryPageDto>> Handle(GetHistoryQuery request, CancellationToken ct)
-    {
-        ArgumentNullException.ThrowIfNull(request);
-        if (currentUser.UserId is null)
-        {
-            return Result<HistoryPageDto>.Fail(ChatAccess.Unauthenticated());
-        }
-
-        var chat = await chats.GetByIdAsync(request.ChatId, ct).ConfigureAwait(false);
-        var member = ChatAccess.RequireMember(chat, currentUser.UserId);
-        if (member.IsFailure)
-        {
-            return Result<HistoryPageDto>.Fail(member.Error);
-        }
-
-        // Store returns newest-first with one extra probe row for hasMore.
-        var rows = await messages.ListHistoryAsync(chat!.Id, request.BeforeSeq, request.Limit + 1, ct)
-            .ConfigureAwait(false);
-        var hasMore = rows.Count > request.Limit;
-        var page = rows.Take(request.Limit).ToList();
-        var dtos = await MessageQueries.EnrichManyAsync(messages, files, users, page, ct, currentUser.UserId).ConfigureAwait(false);
-
-        // Client renders oldest-first; cursor is the oldest seq on this page.
-        var ordered = dtos.OrderBy(d => d.Seq).ToList();
-        long? nextCursor = ordered.Count == 0 ? request.BeforeSeq : ordered.First().Seq;
-        if (!hasMore)
-        {
-            nextCursor = ordered.Count == 0 ? null : ordered.First().Seq;
-        }
-
-        return Result<HistoryPageDto>.Ok(new HistoryPageDto(ordered, hasMore ? nextCursor : null, hasMore));
-    }
-}
-
-public sealed class SyncMessagesHandler(
-    IChatStore chats,
-    IMessageStore messages,
-    IFileStore files,
-    IUserStore users,
-    ICurrentUser currentUser) : IRequestHandler<SyncMessagesQuery, Result<IReadOnlyList<MessageDto>>>
-{
-    public async Task<Result<IReadOnlyList<MessageDto>>> Handle(SyncMessagesQuery request, CancellationToken ct)
-    {
-        ArgumentNullException.ThrowIfNull(request);
-        if (currentUser.UserId is null)
-        {
-            return Result<IReadOnlyList<MessageDto>>.Fail(ChatAccess.Unauthenticated());
-        }
-
-        var chat = await chats.GetByIdAsync(request.ChatId, ct).ConfigureAwait(false);
-        var member = ChatAccess.RequireMember(chat, currentUser.UserId);
-        if (member.IsFailure)
-        {
-            return Result<IReadOnlyList<MessageDto>>.Fail(member.Error);
-        }
-
-        var rows = await messages.ListAfterAsync(chat!.Id, request.AfterSeq, request.Limit, ct)
-            .ConfigureAwait(false);
-        return Result<IReadOnlyList<MessageDto>>.Ok(
-            await MessageQueries.EnrichManyAsync(messages, files, users, rows, ct, currentUser.UserId).ConfigureAwait(false));
-    }
-}
-
-public sealed class ListPinnedHandler(
-    IChatStore chats,
-    IMessageStore messages,
-    IFileStore files,
-    IUserStore users,
-    ICurrentUser currentUser) : IRequestHandler<ListPinnedQuery, Result<IReadOnlyList<MessageDto>>>
-{
-    public async Task<Result<IReadOnlyList<MessageDto>>> Handle(ListPinnedQuery request, CancellationToken ct)
-    {
-        ArgumentNullException.ThrowIfNull(request);
-        if (currentUser.UserId is null)
-        {
-            return Result<IReadOnlyList<MessageDto>>.Fail(ChatAccess.Unauthenticated());
-        }
-
-        var chat = await chats.GetByIdAsync(request.ChatId, ct).ConfigureAwait(false);
-        var member = ChatAccess.RequireMember(chat, currentUser.UserId);
-        if (member.IsFailure)
-        {
-            return Result<IReadOnlyList<MessageDto>>.Fail(member.Error);
-        }
-
-        if (chat!.PinnedMessageIds.Count == 0)
-        {
-            return Result<IReadOnlyList<MessageDto>>.Ok([]);
-        }
-
-        var rows = await messages.ListByIdsAsync(chat.PinnedMessageIds, ct).ConfigureAwait(false);
-        var byId = rows.ToDictionary(m => m.Id);
-        var ordered = chat.PinnedMessageIds
-            .Where(byId.ContainsKey)
-            .Select(id => byId[id])
-            .ToList();
-        return Result<IReadOnlyList<MessageDto>>.Ok(
-            await MessageQueries.EnrichManyAsync(messages, files, users, ordered, ct, currentUser.UserId).ConfigureAwait(false));
     }
 }

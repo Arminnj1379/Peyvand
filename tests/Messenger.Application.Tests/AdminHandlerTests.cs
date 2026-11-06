@@ -1,6 +1,8 @@
 using Messenger.Application.Auth;
 using Messenger.Application.Features.Admin;
 using Messenger.Application.Features.Auth;
+using Messenger.Application.Services;
+using Messenger.Application.Services.Implementations;
 using Messenger.Domain.Users;
 
 namespace Messenger.Application.Tests;
@@ -28,8 +30,8 @@ public sealed class AdminHandlerTests
         return registered.Value!;
     }
 
-    private static FakeCurrentUser As(User user, string? sessionId = null) =>
-        new(user.Id, user.Roles.Select(r => r.ToString()).ToList(), sessionId, user.Username);
+    private static CallerContext As(User user, string? sessionId = null) =>
+        new CallerContext(user.Id, sessionId, user.Roles.Select(r => r.ToString()).ToList());
 
     [Fact]
     public async Task Customer_cannot_create_employees()
@@ -40,9 +42,9 @@ public sealed class AdminHandlerTests
             UserType.Customer, [], null, Now);
         await ctx.Users.AddAsync(registered.Value!, CancellationToken.None);
 
-        var handler = new CreateEmployeeHandler(ctx.Users, ctx.Passwords, ctx.Ids, ctx.Clock, As(registered.Value!));
-        var result = await handler.Handle(
-            new CreateEmployeeCommand("emp1", "Emp", "password123", ["Employee"], null), CancellationToken.None);
+        var admin = new AdminService(ctx.Users, ctx.Sessions, ctx.Passwords, ctx.Ids, ctx.Clock);
+        var result = await admin.CreateEmployeeAsync(
+            new CreateEmployeeCommand("emp1", "Emp", "password123", ["Employee"], null), As(registered.Value!), CancellationToken.None);
 
         Assert.True(result.IsFailure);
         Assert.Equal(AuthErrors.Forbidden, result.Error);
@@ -58,15 +60,15 @@ public sealed class AdminHandlerTests
         await ctx.Users.AddAsync(org.Value!, CancellationToken.None);
         var sysadmin = await SeedAdminAsync(ctx);
 
-        var denied = await new CreateEmployeeHandler(ctx.Users, ctx.Passwords, ctx.Ids, ctx.Clock, As(org.Value!))
-            .Handle(new CreateEmployeeCommand("emp.one", "E", "password123", ["SupportAgent", "SystemAdministrator"], null),
-                CancellationToken.None);
+        var denied = await new AdminService(ctx.Users, ctx.Sessions, ctx.Passwords, ctx.Ids, ctx.Clock)
+            .CreateEmployeeAsync(new CreateEmployeeCommand("emp.one", "E", "password123", ["SupportAgent", "SystemAdministrator"], null),
+                As(org.Value!), CancellationToken.None);
         Assert.True(denied.IsFailure);
         Assert.Equal(AuthErrors.CannotGrantRole, denied.Error);
 
-        var allowed = await new CreateEmployeeHandler(ctx.Users, ctx.Passwords, ctx.Ids, ctx.Clock, As(sysadmin))
-            .Handle(new CreateEmployeeCommand("emp.one", "E", "password123", ["SupportAgent", "OrganizationAdministrator"], null),
-                CancellationToken.None);
+        var allowed = await new AdminService(ctx.Users, ctx.Sessions, ctx.Passwords, ctx.Ids, ctx.Clock)
+            .CreateEmployeeAsync(new CreateEmployeeCommand("emp.one", "E", "password123", ["SupportAgent", "OrganizationAdministrator"], null),
+                As(sysadmin), CancellationToken.None);
         Assert.True(allowed.IsSuccess);
         Assert.Contains("SupportAgent", allowed.Value!.Roles);
         Assert.Contains("OrganizationAdministrator", allowed.Value.Roles);
@@ -79,25 +81,25 @@ public sealed class AdminHandlerTests
         var ctx = new Ctx();
         var sysadmin = await SeedAdminAsync(ctx);
 
-        var created = await new CreateEmployeeHandler(ctx.Users, ctx.Passwords, ctx.Ids, ctx.Clock, As(sysadmin))
-            .Handle(new CreateEmployeeCommand("emp1", "Emp", "password123", [], null), CancellationToken.None);
+        var created = await new AdminService(ctx.Users, ctx.Sessions, ctx.Passwords, ctx.Ids, ctx.Clock)
+            .CreateEmployeeAsync(new CreateEmployeeCommand("emp1", "Emp", "password123", [], null), As(sysadmin), CancellationToken.None);
         Assert.True(created.IsSuccess);
 
         // Employee signs in (session exists), then gets deactivated.
         var tokens = new FakeTokenService(Now);
-        var login = new LoginHandler(ctx.Users, ctx.Sessions, ctx.Passwords, tokens, ctx.Ids, ctx.Clock);
-        var signedIn = await login.Handle(new LoginCommand("emp1", "password123", null, null), CancellationToken.None);
+        var login = new AuthService(ctx.Users, ctx.Sessions, ctx.Passwords, tokens, ctx.Ids, ctx.Clock);
+        var signedIn = await login.LoginAsync(new LoginCommand("emp1", "password123", null, null), CancellationToken.None);
         Assert.True(signedIn.IsSuccess);
 
-        var deactivated = await new SetUserActiveHandler(ctx.Users, ctx.Sessions, ctx.Clock, As(sysadmin))
-            .Handle(new SetUserActiveCommand(created.Value!.Id, false), CancellationToken.None);
+        var deactivated = await new AdminService(ctx.Users, ctx.Sessions, ctx.Passwords, ctx.Ids, ctx.Clock)
+            .SetUserActiveAsync(new SetUserActiveCommand(created.Value!.Id, false), As(sysadmin), CancellationToken.None);
         Assert.True(deactivated.IsSuccess);
         Assert.False(deactivated.Value!.IsActive);
 
         var sessions = await ctx.Sessions.ListByUserAsync(created.Value.Id, 100, CancellationToken.None);
         Assert.All(sessions, s => Assert.True(s.IsRevoked));
 
-        var retry = await login.Handle(new LoginCommand("emp1", "password123", null, null), CancellationToken.None);
+        var retry = await login.LoginAsync(new LoginCommand("emp1", "password123", null, null), CancellationToken.None);
         Assert.True(retry.IsFailure);
         Assert.Equal(AuthErrors.AccountInactive, retry.Error);
     }
@@ -108,8 +110,8 @@ public sealed class AdminHandlerTests
         var ctx = new Ctx();
         var sysadmin = await SeedAdminAsync(ctx);
 
-        var result = await new SetUserActiveHandler(ctx.Users, ctx.Sessions, ctx.Clock, As(sysadmin))
-            .Handle(new SetUserActiveCommand(sysadmin.Id, false), CancellationToken.None);
+        var result = await new AdminService(ctx.Users, ctx.Sessions, ctx.Passwords, ctx.Ids, ctx.Clock)
+            .SetUserActiveAsync(new SetUserActiveCommand(sysadmin.Id, false), As(sysadmin), CancellationToken.None);
 
         Assert.True(result.IsFailure);
         Assert.Equal("user.cannot_change_self", result.Error.Code);
@@ -120,13 +122,13 @@ public sealed class AdminHandlerTests
     {
         var ctx = new Ctx();
         var sysadmin = await SeedAdminAsync(ctx);
-        var created = await new CreateEmployeeHandler(ctx.Users, ctx.Passwords, ctx.Ids, ctx.Clock, As(sysadmin))
-            .Handle(new CreateEmployeeCommand("agent1", "Agent", "password123", ["SupportAgent"], null),
-                CancellationToken.None);
+        var created = await new AdminService(ctx.Users, ctx.Sessions, ctx.Passwords, ctx.Ids, ctx.Clock)
+            .CreateEmployeeAsync(new CreateEmployeeCommand("agent1", "Agent", "password123", ["SupportAgent"], null),
+                As(sysadmin), CancellationToken.None);
         Assert.True(created.IsSuccess);
 
-        var updated = await new SetUserRolesHandler(ctx.Users, ctx.Clock, As(sysadmin))
-            .Handle(new SetUserRolesCommand(created.Value!.Id, ["Employee"]), CancellationToken.None);
+        var updated = await new AdminService(ctx.Users, ctx.Sessions, ctx.Passwords, ctx.Ids, ctx.Clock)
+            .SetUserRolesAsync(new SetUserRolesCommand(created.Value!.Id, ["Employee"]), As(sysadmin), CancellationToken.None);
 
         Assert.True(updated.IsSuccess);
         Assert.Contains("Employee", updated.Value!.Roles);
