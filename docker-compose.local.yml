@@ -1,0 +1,40 @@
+# Local Docker deploy overlay for environments WITHOUT a MinIO image.
+# Usage:
+#   docker compose --env-file .env.docker -f docker-compose.prod.yml -f docker-compose.local.yml build
+#   docker compose --env-file .env.docker -f docker-compose.prod.yml -f docker-compose.local.yml up -d
+#   docker compose --env-file .env.docker -f docker-compose.prod.yml -f docker-compose.local.yml --profile media up -d
+#
+# Differences vs production:
+# - minio service disabled (profile `minio`): image is not pullable here.
+#   The API uses the Filesystem storage provider on a named volume instead.
+# - livekit ports published so browsers can reach the SFU.
+# - web on ${Web__Port:-8081} (port 80 is taken on this machine).
+
+services:
+  minio:
+    profiles: ["minio"]
+
+  # The local mirror's `mongo:8` tag is broken (rejects --replset);
+  # `mongo:8.0` works (same as the kms stack on this machine).
+  mongo:
+    image: mongo:8.0
+
+  mongo-init:
+    image: mongo:8.0
+
+  api:
+    environment:
+      FileStorage__Provider: Filesystem
+      FileStorage__RootPath: /app/data/media
+    volumes:
+      - media-data:/app/data/media
+
+  livekit:
+    ports:
+      - "7880:7880"
+      - "7881:7881"
+      - "7882:7882"
+      - "5349:5349/udp"
+
+volumes:
+  media-data:

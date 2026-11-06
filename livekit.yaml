@@ -1,0 +1,29 @@
+# LiveKit SFU (calls slice). Keys MUST match the API's LiveKit: section
+# (appsettings / LiveKit__ApiKey + LiveKit__ApiSecret env overrides).
+# TURN is embedded: port 5349/udp below + turn.tls_port serve restrictive
+# NATs with the same credentials (no separate coturn needed for MVP).
+# Usage: docker compose --profile media up -d livekit
+
+port: 7880
+bind_addresses:
+  - "0.0.0.0"
+
+rtc:
+  tcp_port: 7881
+  use_external_ip: true
+
+turn:
+  enabled: true
+  tls_port: 5349
+  udp_port: 5349
+  external_tls: true
+
+keys:
+  devkey: devsecret0123456789devsecret0123456789
+
+room:
+  empty_timeout: 300
+  max_participants: 50
+
+logging:
+  level: info

@@ -1,0 +1,13 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Messenger.Api/Messenger.Api.csproj" />
+    <Project Path="src/Messenger.Application/Messenger.Application.csproj" />
+    <Project Path="src/Messenger.Domain/Messenger.Domain.csproj" />
+    <Project Path="src/Messenger.Infrastructure/Messenger.Infrastructure.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Messenger.Api.Tests/Messenger.Api.Tests.csproj" />
+    <Project Path="tests/Messenger.Application.Tests/Messenger.Application.Tests.csproj" />
+    <Project Path="tests/Messenger.Domain.Tests/Messenger.Domain.Tests.csproj" />
+  </Folder>
+</Solution>

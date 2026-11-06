@@ -1,0 +1,453 @@
+using Messenger.Application.Features.Chats;
+using Messenger.Application.Features.Messages;
+using Messenger.Application.Messaging;
+using Messenger.Domain.Chats;
+using Messenger.Domain.Messages;
+using Messenger.Domain.Users;
+
+namespace Messenger.Application.Tests;
+
+/// <summary>Permission boundaries and business rules for the advanced slice:
+/// profiles, visibility, invites, subscriptions, preferences, reactions,
+/// threads, bulk delete, and blocks.</summary>
+public sealed class AdvancedHandlerTests
+{
+    private static readonly DateTime Now = new(2026, 11, 6, 12, 0, 0, DateTimeKind.Utc);
+
+    private sealed class Ctx
+    {
+        public FakeUserStore Users = new();
+        public FakeChatStore Chats = new();
+        public FakeMessageStore Messages = new();
+        public FakeFileStore Files = new();
+        public FakeFileStorage Storage = new();
+        public FakeFileScanner Scanner = new();
+        public FakeAvatarStorage Avatars = new();
+        public FakeClock Clock = new(Now);
+        public FakeIds Ids = new();
+
+        public async Task<User> SeedUserAsync(string username)
+        {
+            var registered = User.Register(
+                Ids.NewId(), username, username, "H:pw", UserType.Employee, [], null, Now);
+            Assert.True(registered.IsSuccess);
+            await Users.AddAsync(registered.Value!, CancellationToken.None);
+            return registered.Value!;
+        }
+
+        public FakeCurrentUser As(User user) => new(user.Id);
+    }
+
+    private static async Task<Chat> SeedGroupAsync(Ctx ctx, User owner, params User[] members)
+    {
+        var ids = new List<string> { owner.Id };
+        ids.AddRange(members.Select(m => m.Id));
+        var handler = new CreateGroupHandler(ctx.Chats, ctx.Users, ctx.Ids, ctx.Clock, ctx.As(owner));
+        var result = await handler.Handle(
+            new CreateGroupCommand("Team", ids, null), CancellationToken.None);
+        Assert.True(result.IsSuccess);
+        return (await ctx.Chats.GetByIdAsync(result.Value!.Id, CancellationToken.None))!;
+    }
+
+    private static async Task<Chat> SeedChannelAsync(Ctx ctx, User owner, bool isPublic, string? username, params User[] subs)
+    {
+        var handler = new CreateChannelHandler(ctx.Chats, ctx.Users, ctx.Ids, ctx.Clock, ctx.As(owner));
+        var result = await handler.Handle(
+            new CreateChannelCommand("News", null, subs.Select(s => s.Id).ToList(), isPublic, username),
+            CancellationToken.None);
+        Assert.True(result.IsSuccess);
+        return (await ctx.Chats.GetByIdAsync(result.Value!.Id, CancellationToken.None))!;
+    }
+
+    private static async Task<MessageDto> SendAsync(Ctx ctx, User sender, string chatId, string body, string clientId, string? replyTo = null)
+    {
+        var handler = new SendMessageHandler(
+            ctx.Chats, ctx.Messages, ctx.Files, ctx.Users, ctx.Ids, ctx.Clock, ctx.As(sender));
+        var result = await handler.Handle(
+            new SendMessageCommand(chatId, body, clientId, replyTo), CancellationToken.None);
+        Assert.True(result.IsSuccess);
+        return result.Value!;
+    }
+
+    [Fact]
+    public async Task UpdateGroup_member_is_rejected()
+    {
+        var ctx = new Ctx();
+        var owner = await ctx.SeedUserAsync("prof.owner");
+        var member = await ctx.SeedUserAsync("prof.member");
+        var chat = await SeedGroupAsync(ctx, owner, member);
+
+        var denied = await new UpdateGroupHandler(ctx.Chats, ctx.Users, ctx.Clock, ctx.As(member))
+            .Handle(new UpdateGroupCommand(chat.Id, "Hijacked", null, null), CancellationToken.None);
+        Assert.True(denied.IsFailure);
+        Assert.Equal(ChatErrors.NotAdmin, denied.Error);
+
+        var ok = await new UpdateGroupHandler(ctx.Chats, ctx.Users, ctx.Clock, ctx.As(owner))
+            .Handle(new UpdateGroupCommand(chat.Id, "Renamed", "About", true), CancellationToken.None);
+        Assert.True(ok.IsSuccess);
+        Assert.Equal("Renamed", ok.Value!.Title);
+        Assert.True(ok.Value.MembersCanInvite);
+    }
+
+    [Fact]
+    public async Task Member_invite_allowed_only_when_group_enables_it()
+    {
+        var ctx = new Ctx();
+        var owner = await ctx.SeedUserAsync("inv.owner");
+        var member = await ctx.SeedUserAsync("inv.member");
+        var newcomer = await ctx.SeedUserAsync("inv.new");
+        var chat = await SeedGroupAsync(ctx, owner, member);
+
+        var denied = await new AddMemberHandler(ctx.Chats, ctx.Users, ctx.Clock, ctx.As(member))
+            .Handle(new AddMemberCommand(chat.Id, newcomer.Id), CancellationToken.None);
+        Assert.True(denied.IsFailure);
+        Assert.Equal(ChatErrors.NotAdmin, denied.Error);
+
+        await new UpdateGroupHandler(ctx.Chats, ctx.Users, ctx.Clock, ctx.As(owner))
+            .Handle(new UpdateGroupCommand(chat.Id, null, null, true), CancellationToken.None);
+
+        var allowed = await new AddMemberHandler(ctx.Chats, ctx.Users, ctx.Clock, ctx.As(member))
+            .Handle(new AddMemberCommand(chat.Id, newcomer.Id), CancellationToken.None);
+        Assert.True(allowed.IsSuccess);
+        Assert.Equal(3, allowed.Value!.MemberCount);
+    }
+
+    [Fact]
+    public async Task Channel_subscriber_cannot_invite()
+    {
+        var ctx = new Ctx();
+        var owner = await ctx.SeedUserAsync("ci.owner");
+        var sub = await ctx.SeedUserAsync("ci.sub");
+        var stranger = await ctx.SeedUserAsync("ci.stranger");
+        var chat = await SeedChannelAsync(ctx, owner, false, null, sub);
+
+        var denied = await new AddMemberHandler(ctx.Chats, ctx.Users, ctx.Clock, ctx.As(sub))
+            .Handle(new AddMemberCommand(chat.Id, stranger.Id), CancellationToken.None);
+        Assert.True(denied.IsFailure);
+        Assert.Equal(ChatErrors.NotAdmin, denied.Error);
+    }
+
+    [Fact]
+    public async Task Visibility_username_conflict_is_rejected()
+    {
+        var ctx = new Ctx();
+        var a = await ctx.SeedUserAsync("vis.a");
+        var b = await ctx.SeedUserAsync("vis.b");
+        var chA = await SeedChannelAsync(ctx, a, true, "dailynews");
+        var chB = await SeedChannelAsync(ctx, b, false, null);
+
+        var clash = await new SetChannelVisibilityHandler(ctx.Chats, ctx.Users, ctx.Clock, ctx.As(b))
+            .Handle(new SetChannelVisibilityCommand(chB.Id, true, "DailyNews"), CancellationToken.None);
+        Assert.True(clash.IsFailure);
+        Assert.Equal(ChatErrors.UsernameTaken, clash.Error);
+
+        // Self re-claim is fine.
+        var self = await new SetChannelVisibilityHandler(ctx.Chats, ctx.Users, ctx.Clock, ctx.As(a))
+            .Handle(new SetChannelVisibilityCommand(chA.Id, true, "dailynews"), CancellationToken.None);
+        Assert.True(self.IsSuccess);
+    }
+
+    [Fact]
+    public async Task Invite_rotate_is_admin_only_and_join_assigns_role()
+    {
+        var ctx = new Ctx();
+        var owner = await ctx.SeedUserAsync("lnk.owner");
+        var member = await ctx.SeedUserAsync("lnk.member");
+        var joiner = await ctx.SeedUserAsync("lnk.joiner");
+        var chat = await SeedGroupAsync(ctx, owner, member);
+
+        var denied = await new RotateInviteHandler(ctx.Chats, ctx.Clock, ctx.As(member))
+            .Handle(new RotateInviteCommand(chat.Id), CancellationToken.None);
+        Assert.True(denied.IsFailure);
+
+        var rotated = await new RotateInviteHandler(ctx.Chats, ctx.Clock, ctx.As(owner))
+            .Handle(new RotateInviteCommand(chat.Id), CancellationToken.None);
+        Assert.True(rotated.IsSuccess);
+        Assert.NotEmpty(rotated.Value!);
+
+        var joined = await new JoinViaInviteHandler(ctx.Chats, ctx.Users, ctx.Clock, ctx.As(joiner))
+            .Handle(new JoinViaInviteCommand(rotated.Value), CancellationToken.None);
+        Assert.True(joined.IsSuccess);
+        Assert.Contains(joined.Value!.Members, m => m.UserId == joiner.Id && m.Role == "Member");
+
+        var badCode = await new JoinViaInviteHandler(ctx.Chats, ctx.Users, ctx.Clock, ctx.As(joiner))
+            .Handle(new JoinViaInviteCommand("deadbeef"), CancellationToken.None);
+        Assert.True(badCode.IsFailure);
+        Assert.Equal(ChatErrors.InviteInvalid, badCode.Error);
+
+        // Revoke kills the link.
+        var revoked = await new RevokeInviteHandler(ctx.Chats, ctx.Clock, ctx.As(owner))
+            .Handle(new RevokeInviteCommand(chat.Id), CancellationToken.None);
+        Assert.True(revoked.IsSuccess);
+        var late = await ctx.SeedUserAsync("lnk.late");
+        var afterRevoke = await new JoinViaInviteHandler(ctx.Chats, ctx.Users, ctx.Clock, ctx.As(late))
+            .Handle(new JoinViaInviteCommand(rotated.Value), CancellationToken.None);
+        Assert.True(afterRevoke.IsFailure);
+        Assert.Equal(ChatErrors.InviteInvalid, afterRevoke.Error);
+    }
+
+    [Fact]
+    public async Task Subscribe_public_ok_private_requires_invite()
+    {
+        var ctx = new Ctx();
+        var owner = await ctx.SeedUserAsync("sub.owner");
+        var fan = await ctx.SeedUserAsync("sub.fan");
+        var pub = await SeedChannelAsync(ctx, owner, true, "openchan");
+        var priv = await SeedChannelAsync(ctx, owner, false, null);
+
+        var ok = await new SubscribeChannelHandler(ctx.Chats, ctx.Users, ctx.Clock, ctx.As(fan))
+            .Handle(new SubscribeChannelCommand(pub.Id), CancellationToken.None);
+        Assert.True(ok.IsSuccess);
+        Assert.Contains(ok.Value!.Members, m => m.UserId == fan.Id && m.Role == "Subscriber");
+
+        var again = await new SubscribeChannelHandler(ctx.Chats, ctx.Users, ctx.Clock, ctx.As(fan))
+            .Handle(new SubscribeChannelCommand(pub.Id), CancellationToken.None);
+        Assert.True(again.IsFailure);
+        Assert.Equal(ChatErrors.AlreadySubscribed, again.Error);
+
+        var denied = await new SubscribeChannelHandler(ctx.Chats, ctx.Users, ctx.Clock, ctx.As(fan))
+            .Handle(new SubscribeChannelCommand(priv.Id), CancellationToken.None);
+        Assert.True(denied.IsFailure);
+        Assert.Equal(ChatErrors.InviteRequired, denied.Error);
+
+        var left = await new UnsubscribeChannelHandler(ctx.Chats, ctx.Clock, ctx.As(fan))
+            .Handle(new UnsubscribeChannelCommand(pub.Id), CancellationToken.None);
+        Assert.True(left.IsSuccess);
+
+        var notSubbed = await new UnsubscribeChannelHandler(ctx.Chats, ctx.Clock, ctx.As(fan))
+            .Handle(new UnsubscribeChannelCommand(pub.Id), CancellationToken.None);
+        Assert.True(notSubbed.IsFailure);
+        Assert.Equal(ChatErrors.NotSubscribed, notSubbed.Error);
+    }
+
+    [Fact]
+    public async Task Preferences_are_caller_relative()
+    {
+        var ctx = new Ctx();
+        var a = await ctx.SeedUserAsync("pref.a");
+        var b = await ctx.SeedUserAsync("pref.b");
+        var chat = await SeedGroupAsync(ctx, a, b);
+
+        var muted = await new SetMuteHandler(ctx.Chats, ctx.Users, ctx.Clock, ctx.As(b))
+            .Handle(new SetMuteCommand(chat.Id, true), CancellationToken.None);
+        Assert.True(muted.IsSuccess);
+        Assert.True(muted.Value!.IsMuted);
+
+        var archived = await new SetArchiveHandler(ctx.Chats, ctx.Users, ctx.Clock, ctx.As(b))
+            .Handle(new SetArchiveCommand(chat.Id, true), CancellationToken.None);
+        Assert.True(archived.IsSuccess);
+        Assert.True(archived.Value!.IsArchived);
+
+        // The other member sees no change.
+        var peer = await new GetChatHandler(ctx.Chats, ctx.Users, ctx.As(a))
+            .Handle(new GetChatQuery(chat.Id), CancellationToken.None);
+        Assert.True(peer.IsSuccess);
+        Assert.False(peer.Value!.IsMuted);
+        Assert.False(peer.Value.IsArchived);
+    }
+
+    [Fact]
+    public async Task MarkUnread_moves_watermark_back()
+    {
+        var ctx = new Ctx();
+        var a = await ctx.SeedUserAsync("unr.a");
+        var b = await ctx.SeedUserAsync("unr.b");
+        var chat = await SeedGroupAsync(ctx, a, b);
+        await SendAsync(ctx, a, chat.Id, "one", "k-1");
+        await SendAsync(ctx, a, chat.Id, "two", "k-2");
+
+        await new MarkReadHandler(ctx.Chats, ctx.Users, ctx.Clock, ctx.As(b))
+            .Handle(new MarkReadCommand(chat.Id, 2), CancellationToken.None);
+
+        var unread = await new MarkUnreadHandler(ctx.Chats, ctx.Users, ctx.Clock, ctx.As(b))
+            .Handle(new MarkUnreadCommand(chat.Id, 2), CancellationToken.None);
+        Assert.True(unread.IsSuccess);
+        Assert.Equal(1, unread.Value!.LastReadSeq);
+        Assert.Equal(1, unread.Value.UnreadCount);
+    }
+
+    [Fact]
+    public async Task Subscriber_can_react_outsider_cannot()
+    {
+        var ctx = new Ctx();
+        var owner = await ctx.SeedUserAsync("rx.owner");
+        var sub = await ctx.SeedUserAsync("rx.sub");
+        var outsider = await ctx.SeedUserAsync("rx.out");
+        var chat = await SeedChannelAsync(ctx, owner, false, null, sub);
+        var msg = await SendAsync(ctx, owner, chat.Id, "broadcast", "k-1");
+
+        var ok = await new ToggleReactionHandler(ctx.Chats, ctx.Messages, ctx.Files, ctx.Users, ctx.Clock, ctx.As(sub))
+            .Handle(new ToggleReactionCommand(msg.Id, "👍"), CancellationToken.None);
+        Assert.True(ok.IsSuccess);
+        Assert.Single(ok.Value!.Reactions);
+        Assert.Equal(1, ok.Value.Reactions[0].Count);
+        Assert.True(ok.Value.Reactions[0].Mine);
+
+        var denied = await new ToggleReactionHandler(ctx.Chats, ctx.Messages, ctx.Files, ctx.Users, ctx.Clock, ctx.As(outsider))
+            .Handle(new ToggleReactionCommand(msg.Id, "👍"), CancellationToken.None);
+        Assert.True(denied.IsFailure);
+        Assert.Equal(ChatErrors.Forbidden, denied.Error);
+    }
+
+    [Fact]
+    public async Task Reply_increments_thread_counter_and_lists_replies()
+    {
+        var ctx = new Ctx();
+        var a = await ctx.SeedUserAsync("thr.a");
+        var b = await ctx.SeedUserAsync("thr.b");
+        var chat = await SeedGroupAsync(ctx, a, b);
+        var parent = await SendAsync(ctx, a, chat.Id, "question", "k-1");
+        var child = await SendAsync(ctx, b, chat.Id, "answer", "k-2", parent.Id);
+
+        Assert.Equal(1, child.ReplyTo is null ? -1 : 1); // reply link present
+        var stored = await ctx.Messages.GetByIdAsync(parent.Id, CancellationToken.None);
+        Assert.Equal(1, stored!.ReplyCount);
+
+        var thread = await new GetRepliesHandler(ctx.Chats, ctx.Messages, ctx.Files, ctx.Users, ctx.As(a))
+            .Handle(new GetRepliesQuery(parent.Id, 10), CancellationToken.None);
+        Assert.True(thread.IsSuccess);
+        Assert.Single(thread.Value!);
+        Assert.Equal(child.Id, thread.Value![0].Id);
+    }
+
+    [Fact]
+    public async Task BulkDelete_enforces_per_message_authorization()
+    {
+        var ctx = new Ctx();
+        var owner = await ctx.SeedUserAsync("blk.owner");
+        var member = await ctx.SeedUserAsync("blk.member");
+        var chat = await SeedGroupAsync(ctx, owner, member);
+        var m1 = await SendAsync(ctx, member, chat.Id, "m1", "k-1");
+        var m2 = await SendAsync(ctx, owner, chat.Id, "m2", "k-2");
+
+        // Member cannot bulk-delete someone else's message.
+        var denied = await new BulkDeleteMessagesHandler(ctx.Chats, ctx.Messages, ctx.Files, ctx.Users, ctx.Clock, ctx.As(member))
+            .Handle(new BulkDeleteMessagesCommand([m1.Id, m2.Id]), CancellationToken.None);
+        Assert.True(denied.IsFailure);
+        Assert.Equal(MessageErrors.CannotDelete, denied.Error);
+
+        // Owner (admin) can delete both.
+        var ok = await new BulkDeleteMessagesHandler(ctx.Chats, ctx.Messages, ctx.Files, ctx.Users, ctx.Clock, ctx.As(owner))
+            .Handle(new BulkDeleteMessagesCommand([m1.Id, m2.Id]), CancellationToken.None);
+        Assert.True(ok.IsSuccess);
+        Assert.Equal(2, ok.Value!.Count);
+    }
+
+    [Fact]
+    public async Task DeleteGroup_owner_only_and_history_survives()
+    {
+        var ctx = new Ctx();
+        var owner = await ctx.SeedUserAsync("del.owner");
+        var admin = await ctx.SeedUserAsync("del.admin");
+        var member = await ctx.SeedUserAsync("del.member");
+        var chat = await SeedGroupAsync(ctx, owner, admin, member);
+        var sent = await SendAsync(ctx, member, chat.Id, "keep me", "k-1");
+
+        // Promote one member to admin: admins still cannot delete.
+        var promoted = await new SetMemberRoleHandler(ctx.Chats, ctx.Users, ctx.Clock, ctx.As(owner))
+            .Handle(new SetMemberRoleCommand(chat.Id, admin.Id, "Admin"), CancellationToken.None);
+        Assert.True(promoted.IsSuccess);
+
+        var adminDenied = await new DeleteGroupHandler(ctx.Chats, ctx.Users, ctx.Clock, ctx.As(admin))
+            .Handle(new DeleteGroupCommand(chat.Id), CancellationToken.None);
+        Assert.True(adminDenied.IsFailure);
+        Assert.Equal(ChatErrors.OnlyOwner, adminDenied.Error);
+
+        var memberDenied = await new DeleteGroupHandler(ctx.Chats, ctx.Users, ctx.Clock, ctx.As(member))
+            .Handle(new DeleteGroupCommand(chat.Id), CancellationToken.None);
+        Assert.True(memberDenied.IsFailure);
+        Assert.Equal(ChatErrors.OnlyOwner, memberDenied.Error);
+
+        var ok = await new DeleteGroupHandler(ctx.Chats, ctx.Users, ctx.Clock, ctx.As(owner))
+            .Handle(new DeleteGroupCommand(chat.Id), CancellationToken.None);
+        Assert.True(ok.IsSuccess);
+
+        // Soft-delete: the tracked doc is flagged, history is preserved,
+        // and deleted chats are invisible to reads (same as production).
+        Assert.True(chat.IsDeleted);
+        var stored = await ctx.Chats.GetByIdAsync(chat.Id, CancellationToken.None);
+        Assert.Null(stored);
+        var history = await ctx.Messages.GetByIdAsync(sent.Id, CancellationToken.None);
+        Assert.NotNull(history);
+        Assert.False(history!.IsDeleted);
+
+        // A deleted group reads back as not-found (no member access leaks).
+        var again = await new DeleteGroupHandler(ctx.Chats, ctx.Users, ctx.Clock, ctx.As(owner))
+            .Handle(new DeleteGroupCommand(chat.Id), CancellationToken.None);
+        Assert.True(again.IsFailure);
+        Assert.Equal(ChatErrors.NotFound, again.Error);
+    }
+
+    [Fact]
+    public async Task DeleteGroup_outsider_and_dm_are_rejected()
+    {
+        var ctx = new Ctx();
+        var owner = await ctx.SeedUserAsync("del2.owner");
+        var member = await ctx.SeedUserAsync("del2.member");
+        var outsider = await ctx.SeedUserAsync("del2.out");
+        var chat = await SeedGroupAsync(ctx, owner, member);
+
+        var forbidden = await new DeleteGroupHandler(ctx.Chats, ctx.Users, ctx.Clock, ctx.As(outsider))
+            .Handle(new DeleteGroupCommand(chat.Id), CancellationToken.None);
+        Assert.True(forbidden.IsFailure);
+        Assert.Equal(ChatErrors.Forbidden, forbidden.Error);
+
+        var dm = await new CreateDmHandler(ctx.Chats, ctx.Users, ctx.Ids, ctx.Clock, ctx.As(owner))
+            .Handle(new CreateDmCommand(member.Id), CancellationToken.None);
+        Assert.True(dm.IsSuccess);
+
+        var dmDenied = await new DeleteGroupHandler(ctx.Chats, ctx.Users, ctx.Clock, ctx.As(owner))
+            .Handle(new DeleteGroupCommand(dm.Value!.Id), CancellationToken.None);
+        Assert.True(dmDenied.IsFailure);
+        Assert.Equal(ChatErrors.DmMembershipFixed, dmDenied.Error);
+    }
+
+    [Fact]
+    public async Task Block_prevents_dm_create_and_send()
+    {
+        var ctx = new Ctx();
+        var a = await ctx.SeedUserAsync("bl.a");
+        var b = await ctx.SeedUserAsync("bl.b");
+
+        Assert.True(b.Block(a.Id, Now).IsSuccess);
+        await ctx.Users.UpdateAsync(b, CancellationToken.None);
+
+        var dm = await new CreateDmHandler(ctx.Chats, ctx.Users, ctx.Ids, ctx.Clock, ctx.As(a))
+            .Handle(new CreateDmCommand(b.Id), CancellationToken.None);
+        Assert.True(dm.IsFailure);
+        Assert.Equal(ChatErrors.Blocked, dm.Error);
+
+        // Unblocked pair works, then a later block stops sends.
+        b.Unblock(a.Id, Now);
+        await ctx.Users.UpdateAsync(b, CancellationToken.None);
+        var ok = await new CreateDmHandler(ctx.Chats, ctx.Users, ctx.Ids, ctx.Clock, ctx.As(a))
+            .Handle(new CreateDmCommand(b.Id), CancellationToken.None);
+        Assert.True(ok.IsSuccess);
+
+        Assert.True(a.Block(b.Id, Now).IsSuccess);
+        await ctx.Users.UpdateAsync(a, CancellationToken.None);
+        var send = await new SendMessageHandler(ctx.Chats, ctx.Messages, ctx.Files, ctx.Users, ctx.Ids, ctx.Clock, ctx.As(b))
+            .Handle(new SendMessageCommand(ok.Value!.Id, "hi", "k-1", null), CancellationToken.None);
+        Assert.True(send.IsFailure);
+        Assert.Equal(ChatErrors.Blocked, send.Error);
+    }
+
+    [Fact]
+    public async Task Chat_avatar_upload_is_admin_only()
+    {
+        var ctx = new Ctx();
+        var owner = await ctx.SeedUserAsync("av.owner");
+        var member = await ctx.SeedUserAsync("av.member");
+        var chat = await SeedGroupAsync(ctx, owner, member);
+        var png = new byte[] { 0x89, 0x50, 0x4E, 0x47, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
+
+        var denied = await new UploadChatAvatarHandler(ctx.Chats, ctx.Users, ctx.Avatars, ctx.Clock, ctx.As(member))
+            .Handle(new UploadChatAvatarCommand(chat.Id, png, "image/png"), CancellationToken.None);
+        Assert.True(denied.IsFailure);
+
+        var ok = await new UploadChatAvatarHandler(ctx.Chats, ctx.Users, ctx.Avatars, ctx.Clock, ctx.As(owner))
+            .Handle(new UploadChatAvatarCommand(chat.Id, png, "image/png"), CancellationToken.None);
+        Assert.True(ok.IsSuccess);
+        Assert.NotNull(ok.Value!.AvatarUrl);
+    }
+}

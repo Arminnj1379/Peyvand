@@ -1,0 +1,106 @@
+# Production composition. Secrets come from the environment (or a .env file
+# next to this file) — never baked into images. Start with:
+#
+#   Jwt__SigningKey=$(openssl rand -base64 48)  (min 32 chars, keep it secret)
+#   Minio__AccessKey=... Minio__SecretKey=...   (NOT the dev defaults)
+#   docker compose -f docker-compose.prod.yml up -d
+#
+# Media profile (voice/video SFU):  docker compose -f docker-compose.prod.yml --profile media up -d
+# Internet deployments terminate TLS at an outer reverse proxy / load balancer
+# in front of `web` (see docs/deployment.md).
+
+services:
+  mongo:
+    image: mongo:8
+    command: ["--replSet", "rs0", "--bind_ip_all"]
+    volumes: ["mongo-data:/data/db"]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  mongo-init:
+    image: mongo:8
+    depends_on:
+      mongo:
+        condition: service_healthy
+    command: >
+      mongosh --host mongo:27017 --quiet --eval
+      "try { rs.initiate({ _id: 'rs0', members: [{ _id: 0, host: 'mongo:27017' }] }) } catch (e) { print(e.message) }"
+    restart: "no"
+
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    volumes: ["minio-data:/data"]
+    environment:
+      MINIO_ROOT_USER: ${Minio__AccessKey:?Set Minio__AccessKey}
+      MINIO_ROOT_PASSWORD: ${Minio__SecretKey:?Set Minio__SecretKey}
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  api:
+    build:
+      context: .
+      dockerfile: src/Messenger.Api/Dockerfile
+    depends_on:
+      mongo:
+        condition: service_healthy
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      Mongo__ConnectionString: mongodb://mongo:27017?directConnection=true
+      Mongo__DatabaseName: ${Mongo__DatabaseName:-messenger}
+      Jwt__SigningKey: ${Jwt__SigningKey:?Set Jwt__SigningKey (min 32 chars)}
+      Jwt__Issuer: ${Jwt__Issuer:-messenger}
+      Jwt__Audience: ${Jwt__Audience:-messenger}
+      Minio__Endpoint: minio:9000
+      Minio__AccessKey: ${Minio__AccessKey:?Set Minio__AccessKey}
+      Minio__SecretKey: ${Minio__SecretKey:?Set Minio__SecretKey}
+      Minio__Bucket: ${Minio__Bucket:-messenger-media}
+      LiveKit__Url: ${LiveKit__Url:-}
+      LiveKit__ApiKey: ${LiveKit__ApiKey:-}
+      LiveKit__ApiSecret: ${LiveKit__ApiSecret:-}
+      Cors__AllowedOrigins__0: ${Web__Origin:-http://localhost}
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 40s
+
+  web:
+    build:
+      context: ./frontend
+      args:
+        VITE_API_BASE_URL: ${Web__ApiBaseUrl:-}
+    depends_on:
+      api:
+        condition: service_healthy
+    ports: ["${Web__Port:-80}:80"]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  livekit:
+    image: livekit/livekit-server:latest
+    command: --config /etc/livekit.yaml
+    environment:
+      LIVEKIT_API_KEY: ${LiveKit__ApiKey:-devkey}
+      LIVEKIT_API_SECRET: ${LiveKit__ApiSecret:-devsecret0123456789devsecret0123456789}
+    volumes: ["./livekit.yaml:/etc/livekit.yaml:ro"]
+    profiles: ["media"]
+    restart: unless-stopped
+
+volumes:
+  mongo-data:
+  minio-data:

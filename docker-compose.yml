@@ -1,0 +1,57 @@
+# Local infrastructure (Phase 0). The API runs from source (`dotnet run`);
+# only stateful dependencies live here for now. `api`/`web` images arrive
+# with the Phase 5 hardening slice.
+#
+# Usage:  docker compose up -d mongo minio
+# Mongo is a single-node replica set (transactions + change streams work;
+# add members via the prod overlay in Phase 5).
+
+services:
+  mongo:
+    image: mongo:8
+    command: ["--replSet", "rs0", "--bind_ip_all"]
+    ports: ["27017:27017"]
+    volumes: ["mongo-data:/data/db"]
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  mongo-init:
+    image: mongo:8
+    depends_on:
+      mongo:
+        condition: service_healthy
+    command: >
+      mongosh --host mongo:27017 --quiet --eval
+      "try { rs.initiate({ _id: 'rs0', members: [{ _id: 0, host: 'mongo:27017' }] }) } catch (e) { print(e.message) }"
+    restart: "no"
+
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    ports: ["9000:9000", "9001:9001"]
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    volumes: ["minio-data:/data"]
+    # Buckets + policies are created in the Media slice (Phase 2).
+
+  # Voice/video SFU. Clients connect directly (UDP/TLS); the API only mints
+  # room tokens. Keys MUST match the API's LiveKit: section. The bundled TURN
+  # (port 5349) covers restrictive NATs; expose it when clients call from
+  # outside the LAN. Disabled by default (no API dependency at boot).
+  livekit:
+    image: livekit/livekit-server:latest
+    command: --config /etc/livekit.yaml
+    ports: ["7880:7880", "7881:7881", "7882:7882", "5349:5349/udp"]
+    environment:
+      LIVEKIT_API_KEY: devkey
+      LIVEKIT_API_SECRET: devsecret0123456789devsecret0123456789
+    volumes: ["./livekit.yaml:/etc/livekit.yaml:ro"]
+    profiles: ["media"]
+
+volumes:
+  mongo-data:
+  minio-data:
