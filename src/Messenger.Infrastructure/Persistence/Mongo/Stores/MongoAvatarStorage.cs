@@ -1,5 +1,6 @@
 using Messenger.Application.Abstractions;
 using Messenger.Infrastructure.Persistence.Mongo.Documents;
+using MongoDB.Bson;
 using MongoDB.Driver;
 
 namespace Messenger.Infrastructure.Persistence.Mongo.Stores;
@@ -27,11 +28,19 @@ public sealed class MongoAvatarStorage(MongoDbContext context, IClock clock) : I
                 Builders<AvatarDocument>.IndexKeys.Ascending(d => d.ObjectKey),
                 new CreateIndexOptions { Unique = true, Name = "ux_object_key" }),
             cancellationToken: ct).ConfigureAwait(false);
+        // One avatar per owner (user id, or chat-{chatId} for groups/channels).
+        // Sparse: rows written before ownerKey existed have no such element.
+        await keys.CreateOneAsync(
+            new CreateIndexModel<AvatarDocument>(
+                Builders<AvatarDocument>.IndexKeys.Ascending(d => d.OwnerKey),
+                new CreateIndexOptions { Unique = true, Sparse = true, Name = "ux_owner_key" }),
+            cancellationToken: ct).ConfigureAwait(false);
     }
 
-    public async Task<AvatarReference> SaveAsync(string userId, string contentType, byte[] bytes, CancellationToken ct)
+    /// <param name="ownerKey">Owner namespace: user id, or chat-{chatId} for group/channel avatars.</param>
+    public async Task<AvatarReference> SaveAsync(string ownerKey, string contentType, byte[] bytes, CancellationToken ct)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(userId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(ownerKey);
         ArgumentException.ThrowIfNullOrWhiteSpace(contentType);
         ArgumentNullException.ThrowIfNull(bytes);
 
@@ -43,10 +52,23 @@ public sealed class MongoAvatarStorage(MongoDbContext context, IClock clock) : I
             _ => throw new ArgumentException($"Unsupported content type: {contentType}.", nameof(contentType))
         };
 
-        var objectKey = $"avatars/{userId}/{Guid.NewGuid():n}.{extension}";
+        var objectKey = $"avatars/{ownerKey}/{Guid.NewGuid():n}.{extension}";
+
+        // Rows written before ownerKey existed keyed the owner id as _id (valid
+        // only for user ids, never for chat-{id}). Drop the stale row so each
+        // owner keeps exactly one avatar; reuses no _id so ReplaceOne below
+        // never trips the immutable-_id rule.
+        var existing = await Collection.Find(d => d.OwnerKey == ownerKey).FirstOrDefaultAsync(ct)
+            .ConfigureAwait(false);
+        if (existing is null && ObjectId.TryParse(ownerKey, out _))
+        {
+            await Collection.DeleteOneAsync(d => d.UserId == ownerKey, ct).ConfigureAwait(false);
+        }
+
         var doc = new AvatarDocument
         {
-            UserId = userId,
+            UserId = existing?.UserId ?? ObjectId.GenerateNewId().ToString(),
+            OwnerKey = ownerKey,
             ObjectKey = objectKey,
             ContentType = contentType,
             Bytes = bytes,
@@ -54,7 +76,7 @@ public sealed class MongoAvatarStorage(MongoDbContext context, IClock clock) : I
         };
 
         await Collection.ReplaceOneAsync(
-            d => d.UserId == userId,
+            d => d.OwnerKey == ownerKey,
             doc,
             new ReplaceOptions { IsUpsert = true },
             ct).ConfigureAwait(false);
