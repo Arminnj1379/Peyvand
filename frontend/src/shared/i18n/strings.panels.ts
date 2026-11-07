@@ -175,6 +175,7 @@ registerStrings('en', {
   'viewer.downloadFile': 'Download {name}',
   'viewer.download': 'Download',
   'viewer.closeViewer': 'Close viewer',
+  'viewer.openVideo': 'Open video {name}',
 
   'player.playTrack': 'Play {name}',
   'player.pauseTrack': 'Pause {name}',
@@ -189,6 +190,12 @@ registerStrings('en', {
   'player.fullscreen': 'Fullscreen',
   'player.seekVideo': 'Seek video',
   'player.audioError': 'Voice message unavailable',
+  'player.videoError': 'Video unavailable',
+  'player.playVideo': 'Play video',
+  'player.pauseVideo': 'Pause video',
+  'player.volume': 'Volume',
+  'player.speed': 'Playback speed',
+  'player.exitFullscreen': 'Exit fullscreen',
 
   'status.connecting': 'connecting…',
   'status.offline': 'backend offline',
@@ -375,6 +382,7 @@ registerStrings('fa', {
   'viewer.downloadFile': 'دانلود {name}',
   'viewer.download': 'دانلود',
   'viewer.closeViewer': 'بستن نمایشگر',
+  'viewer.openVideo': 'باز کردن ویدیو {name}',
 
   'player.playTrack': 'پخش {name}',
   'player.pauseTrack': 'توقف {name}',
@@ -389,6 +397,12 @@ registerStrings('fa', {
   'player.fullscreen': 'تمام‌صفحه',
   'player.seekVideo': 'تغییر زمان ویدیو',
   'player.audioError': 'پیام صوتی در دسترس نیست',
+  'player.videoError': 'ویدیو در دسترس نیست',
+  'player.playVideo': 'پخش ویدیو',
+  'player.pauseVideo': 'توقف ویدیو',
+  'player.volume': 'صدا',
+  'player.speed': 'سرعت پخش',
+  'player.exitFullscreen': 'خروج از تمام‌صفحه',
 
   'status.connecting': 'در حال اتصال…',
   'status.offline': 'بک‌اند آفلاین',

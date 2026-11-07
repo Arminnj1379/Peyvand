@@ -42,6 +42,7 @@ export type IconName =
   | 'volume'
   | 'volumeOff'
   | 'expand'
+  | 'compress'
   | 'refresh';
 
 function paths(name: IconName): string {
@@ -132,6 +133,8 @@ function paths(name: IconName): string {
       return '<polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" fill="currentColor" stroke="none"/><line x1="23" y1="9" x2="17" y2="15"/><line x1="17" y1="9" x2="23" y2="15"/>';
     case 'expand':
       return '<path d="M8 3H5a2 2 0 0 0-2 2v3"/><path d="M16 3h3a2 2 0 0 1 2 2v3"/><path d="M8 21H5a2 2 0 0 1-2-2v-3"/><path d="M16 21h3a2 2 0 0 0 2-2v-3"/>';
+    case 'compress':
+      return '<path d="M4 14h6v6"/><path d="M20 10h-6V4"/><path d="M14 10l7-7"/><path d="M3 21l7-7"/>';
     case 'refresh':
       return '<polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>';
   }

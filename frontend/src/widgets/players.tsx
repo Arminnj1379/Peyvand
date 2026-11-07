@@ -13,7 +13,7 @@ export function formatMediaTime(totalSeconds: number): string {
 }
 
 /** Pause other bubble players so two tracks never overlap (call tiles excluded). */
-function pauseOtherPlayers(except: HTMLMediaElement | null): void {
+export function pauseOtherPlayers(except: HTMLMediaElement | null): void {
   document
     .querySelectorAll<HTMLMediaElement>('audio[data-tg-media], video[data-tg-media]')
     .forEach((el) => {
@@ -54,7 +54,7 @@ function barsFor(seed: string, count = 44): number[] {
   });
 }
 
-function seekFromPointer(
+export function seekFromPointer(
   e: { clientX: number },
   el: HTMLElement | null,
   apply: (ratio: number) => void,
@@ -386,127 +386,38 @@ export function VoicePlayer({ url, fileId }: { url: string; fileId: string }) {
   );
 }
 
-/* ── Video: rounded frame, center play, duration badge, mini controls ──── */
+/* ── Video preview: compact thumbnail; tap opens the fullscreen viewer ──
+ *  The bubble never plays video inline: no controls, no autoplay. */
 
-export function VideoPlayer({ url, fileName }: { url: string; fileName: string }) {
+export function VideoPreview({ url, fileName, onOpen }: { url: string; fileName: string; onOpen: () => void }) {
   const t = useT();
-  const wrapRef = useRef<HTMLSpanElement | null>(null);
-  const videoRef = useRef<HTMLVideoElement | null>(null);
-  const progressRef = useRef<HTMLSpanElement | null>(null);
-  const [playing, setPlaying] = useState(false);
-  const [started, setStarted] = useState(false);
-  const [muted, setMuted] = useState(false);
-  const [time, setTime] = useState(0);
   const [duration, setDuration] = useState(0);
 
-  const progress = duration > 0 ? Math.min(1, time / duration) : 0;
-
-  function toggle(): void {
-    const video = videoRef.current;
-    if (!video) return;
-    if (video.paused) {
-      pauseOtherPlayers(video);
-      void video.play().catch(() => undefined);
-    } else {
-      video.pause();
-    }
-  }
-
-  function toggleFullscreen(): void {
-    const wrap = wrapRef.current;
-    if (!wrap) return;
-    if (document.fullscreenElement) {
-      void document.exitFullscreen().catch(() => undefined);
-      return;
-    }
-    if (wrap.requestFullscreen) void wrap.requestFullscreen().catch(() => undefined);
-  }
-
-  function toggleMuted(): void {
-    const video = videoRef.current;
-    if (!video) return;
-    video.muted = !video.muted;
-    setMuted(video.muted);
-  }
-
   return (
-    <span ref={wrapRef} className="tg-video">
+    <button
+      type="button"
+      className="tg-video"
+      onClick={onOpen}
+      aria-label={t('viewer.openVideo', { name: fileName })}
+    >
       <video
-        ref={videoRef}
-        data-tg-media
         src={url}
         preload="metadata"
+        muted
         playsInline
-        aria-label={fileName}
-        onClick={toggle}
-        onPlay={() => {
-          pauseOtherPlayers(videoRef.current);
-          setPlaying(true);
-          setStarted(true);
-        }}
-        onPause={() => setPlaying(false)}
-        onEnded={() => setPlaying(false)}
-        onTimeUpdate={(e) => setTime(e.currentTarget.currentTime)}
+        disablePictureInPicture
+        aria-hidden="true"
+        tabIndex={-1}
         onLoadedMetadata={(e) => {
           setDuration(Number.isFinite(e.currentTarget.duration) ? e.currentTarget.duration : 0);
-          setTime(e.currentTarget.currentTime);
-          setMuted(e.currentTarget.muted);
         }}
       />
-      {!playing ? (
-        <button type="button" className="tg-video-play" onClick={toggle} aria-label={t('player.playTrack', { name: fileName })}>
-          <Icon name="play" size={28} />
-        </button>
+      <span className="tgv-play" aria-hidden="true">
+        <Icon name="play" size={26} />
+      </span>
+      {duration > 0 ? (
+        <span className="tgv-dur">{formatMediaTime(duration)}</span>
       ) : null}
-      <span className="tg-video-bottom">
-        <span className="tg-video-badge">
-          {started && duration > 0
-            ? `${formatMediaTime(time)} / ${formatMediaTime(duration)}`
-            : formatMediaTime(duration)}
-        </span>
-        <span className="tg-video-btns">
-          <button
-            type="button"
-            className="tg-video-icon"
-            onClick={toggleMuted}
-            aria-label={muted ? t('player.unmute') : t('player.mute')}
-            title={muted ? t('player.unmute') : t('player.mute')}
-          >
-            <Icon name={muted ? 'volumeOff' : 'volume'} size={16} />
-          </button>
-          <button
-            type="button"
-            className="tg-video-icon"
-            onClick={toggleFullscreen}
-            aria-label={t('player.fullscreen')}
-            title={t('player.fullscreen')}
-          >
-            <Icon name="expand" size={16} />
-          </button>
-        </span>
-      </span>
-      <span
-        ref={progressRef}
-        className="tg-video-progress"
-        role="slider"
-        aria-label={t('player.seekVideo')}
-        aria-valuemin={0}
-        aria-valuemax={Math.round(duration)}
-        aria-valuenow={Math.round(time)}
-        tabIndex={0}
-        onClick={(e) => seekFromPointer(e, progressRef.current, (r) => {
-          const video = videoRef.current;
-          if (video && Number.isFinite(video.duration)) video.currentTime = r * video.duration;
-        })}
-        onKeyDown={(e) => {
-          const video = videoRef.current;
-          if (!video || !Number.isFinite(video.duration)) return;
-          if (e.key === 'ArrowRight') video.currentTime = Math.min(video.duration, video.currentTime + 5);
-          if (e.key === 'ArrowLeft') video.currentTime = Math.max(0, video.currentTime - 5);
-        }}
-      >
-        <span className="tg-video-progress-fill" style={{ width: `${progress * 100}%` }} />
-      </span>
-    </span>
+    </button>
   );
 }

@@ -5,15 +5,17 @@ import type { Attachment } from '../features/files/fileTypes';
 import type { Message } from '../features/messages/messageTypes';
 import { Icon } from '../shared/ui/Icon';
 import { useT } from '../shared/i18n';
-import { MusicPlayer, VideoPlayer, VoicePlayer } from './players';
+import { MusicPlayer, VideoPreview, VoicePlayer } from './players';
 
 /** Inline attachment rendering inside a bubble (images, video, audio, documents). */
 export function AttachmentView({
   message,
   onOpenImage,
+  onOpenVideo,
 }: {
   message: Message;
   onOpenImage: (attachment: Attachment) => void;
+  onOpenVideo: (attachment: Attachment) => void;
 }) {
   const attachment = message.attachment;
   const url = useAttachmentUrl(attachment?.fileId, attachment?.kind ?? '');
@@ -50,7 +52,7 @@ export function AttachmentView({
   if (attachment.kind === 'Video') {
     return url ? (
       <span className="attachment-media-wrap">
-        <VideoPlayer url={url} fileName={attachment.fileName} />
+        <VideoPreview url={url} fileName={attachment.fileName} onOpen={() => onOpenVideo(attachment)} />
       </span>
     ) : (
       <span className="attachment-loading">{t('viewer.loadingVideo')}</span>
@@ -91,7 +93,7 @@ export function AttachmentView({
   );
 }
 
-/** Fullscreen image viewer (lightbox). Videos play inline; audio too. */
+/** Fullscreen image viewer (lightbox). Videos open in VideoViewer; audio plays inline. */
 export function MediaViewer({
   attachment,
   onClose,

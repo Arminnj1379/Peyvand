@@ -23,6 +23,7 @@ import { useEscape } from '../shared/ui/useEscape';
 import { useOverlayTransition } from '../shared/motion/useOverlayTransition';
 import { useT } from '../shared/i18n';
 import { AttachmentView, MediaViewer } from './MediaViewer';
+import { VideoViewer } from './VideoViewer';
 
 const PAGE_SIZE = 30;
 const AVATAR_COLORS = ['#2aabee', '#7b61ff', '#31b545', '#e8a13d', '#df3f40', '#009688'];
@@ -132,6 +133,7 @@ export function ChatWindow({
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
   const [viewer, setViewer] = useState<Attachment | null>(null);
+  const [videoViewer, setVideoViewer] = useState<Attachment | null>(null);
   const [callBusy, setCallBusy] = useState(false);
   const [callError, setCallError] = useState<string | null>(null);
   const [emojiOpen, setEmojiOpen] = useState(false);
@@ -163,6 +165,7 @@ export function ChatWindow({
   // after close so the `.leaving` CSS exit can play.
   const menuTransition = useOverlayTransition(menu !== null, 150);
   const viewerTransition = useOverlayTransition(viewer !== null, 170);
+  const videoTransition = useOverlayTransition(videoViewer !== null, 180);
   const threadTransition = useOverlayTransition(threadParent !== null, 180);
   const forwardTransition = useOverlayTransition(forwardMsg !== null || forwardMany !== null, 170);
   const deleteTransition = useOverlayTransition(deleteTarget !== null, 170);
@@ -175,6 +178,9 @@ export function ChatWindow({
   const lastViewerRef = useRef(viewer);
   if (viewer) lastViewerRef.current = viewer;
   const renderViewer = viewer ?? lastViewerRef.current;
+  const lastVideoRef = useRef(videoViewer);
+  if (videoViewer) lastVideoRef.current = videoViewer;
+  const renderVideo = videoViewer ?? lastVideoRef.current;
   const lastThreadRef = useRef(threadParent);
   if (threadParent) lastThreadRef.current = threadParent;
   const renderThread = threadParent ?? lastThreadRef.current;
@@ -263,6 +269,7 @@ export function ChatWindow({
     setSelected(new Set());
     setThreadParent(null);
     setViewer(null);
+    setVideoViewer(null);
     setUploadError(null);
     setCallError(null);
     setActionError(null);
@@ -1033,7 +1040,7 @@ export function ChatWindow({
                   ) : null}
                   <span dir="auto">{m.isDeleted ? <i>{t('chat.messageDeleted')}</i> : <MessageBody body={m.body} />}</span>
                   {!m.isDeleted && m.attachment ? (
-                    <AttachmentView message={m} onOpenImage={setViewer} />
+                    <AttachmentView message={m} onOpenImage={setViewer} onOpenVideo={setVideoViewer} />
                   ) : null}
                   {url ? (
                     <a
@@ -1397,6 +1404,14 @@ export function ChatWindow({
           attachment={renderViewer}
           onClose={() => setViewer(null)}
           leaving={viewerTransition.leaving}
+        />
+      ) : null}
+
+      {videoTransition.shouldRender && renderVideo ? (
+        <VideoViewer
+          attachment={renderVideo}
+          onClose={() => setVideoViewer(null)}
+          leaving={videoTransition.leaving}
         />
       ) : null}
 
