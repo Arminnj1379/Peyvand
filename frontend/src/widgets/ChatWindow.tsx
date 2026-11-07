@@ -20,6 +20,7 @@ import { useUserQuery } from '../features/auth/useUser';
 import { EmptyState } from '../shared/ui/EmptyState';
 import { Icon } from '../shared/ui/Icon';
 import { useEscape } from '../shared/ui/useEscape';
+import { useT } from '../shared/i18n';
 import { AttachmentView, MediaViewer } from './MediaViewer';
 
 const PAGE_SIZE = 30;
@@ -152,6 +153,7 @@ export function ChatWindow({
   const prevLenRef = useRef(0);
   const lastAckedSeq = useRef(0);
   const typingTimer = useRef<number | null>(null);
+  const t = useT();
 
   const forwardOpen = forwardMsg !== null || forwardMany !== null;
   useEscape(menu !== null, () => setMenu(null));
@@ -367,9 +369,9 @@ export function ChatWindow({
         } catch {
           // Fall through to the busy message below.
         }
-        setCallError('This conversation already has an active call.');
+        setCallError(t('chat.callActive'));
       } else {
-        setCallError(e instanceof ApiError ? e.message : 'Could not start the call.');
+        setCallError(e instanceof ApiError ? e.message : t('chat.callFailed'));
       }
     } finally {
       setCallBusy(false);
@@ -405,7 +407,7 @@ export function ChatWindow({
     } catch (e) {
       if (previewUrl) URL.revokeObjectURL(previewUrl);
       setPending(null);
-      setUploadError(e instanceof ApiError ? e.message : 'Upload failed.');
+      setUploadError(e instanceof ApiError ? e.message : t('chat.uploadFailed'));
     } finally {
       setUploading(false);
     }
@@ -427,7 +429,7 @@ export function ChatWindow({
         setDraft('');
       } catch (e) {
         // Composer stays open with the text intact; surface the reason above it.
-        setActionError(e instanceof ApiError ? e.message : 'Could not save the edited message.');
+        setActionError(e instanceof ApiError ? e.message : t('chat.editFailed'));
       } finally {
         setSending(false);
       }
@@ -543,7 +545,7 @@ export function ChatWindow({
       );
       setDeleteTarget(null);
     } catch (e) {
-      setActionError(e instanceof ApiError ? e.message : 'Could not delete the message.');
+      setActionError(e instanceof ApiError ? e.message : t('chat.deleteFailed'));
     } finally {
       setDeleting(false);
     }
@@ -556,7 +558,7 @@ export function ChatWindow({
         patchById(old, saved),
       );
     } catch (e) {
-      setActionError(e instanceof ApiError ? e.message : 'Could not update the reaction.');
+      setActionError(e instanceof ApiError ? e.message : t('chat.reactionFailed'));
     }
   }
 
@@ -583,7 +585,7 @@ export function ChatWindow({
       setBulkConfirm(false);
     } catch (e) {
       // Leave selection intact so the user can retry.
-      setActionError(e instanceof ApiError ? e.message : 'Could not delete the selected messages.');
+      setActionError(e instanceof ApiError ? e.message : t('chat.bulkDeleteFailed'));
     } finally {
       setBulkDeleting(false);
     }
@@ -601,7 +603,7 @@ export function ChatWindow({
       await queryClient.invalidateQueries({ queryKey: ['chats'] });
       await pinsQuery.refetch();
     } catch (e) {
-      setActionError(e instanceof ApiError ? e.message : 'Could not update the pinned message.');
+      setActionError(e instanceof ApiError ? e.message : t('chat.pinFailed'));
     }
   }
 
@@ -627,7 +629,7 @@ export function ChatWindow({
       }
     } catch (e) {
       // Leave the picker open so the user can try another target.
-      setForwardError(e instanceof ApiError ? e.message : 'Could not forward the message.');
+      setForwardError(e instanceof ApiError ? e.message : t('chat.forwardFailed'));
     } finally {
       setForwarding(false);
     }
@@ -663,27 +665,29 @@ export function ChatWindow({
 
   const statusLine =
     typingNames.length > 0
-      ? `${typingNames.length === 1 ? 'typing' : `${typingNames.length} typing`}…`
+      ? (typingNames.length === 1
+          ? t('chat.typing')
+          : t('chat.typingMany', { count: typingNames.length }))
       : chat.type === 'Channel'
-        ? `${chat.memberCount} subscriber${chat.memberCount === 1 ? '' : 's'}${chat.isPublic && chat.username ? ` · @${chat.username}` : ''}`
+        ? `${chat.memberCount === 1 ? t('chat.subscriberOne') : t('chat.subscribers', { count: chat.memberCount })}${chat.isPublic && chat.username ? ` · @${chat.username}` : ''}`
         : chat.type === 'Group'
-          ? `${chat.memberCount} member${chat.memberCount === 1 ? '' : 's'}`
+          ? (chat.memberCount === 1 ? t('chat.memberOne') : t('chat.members', { count: chat.memberCount }))
           : dmStatus;
 
   const forwardPickerItems = forwardMany ?? (forwardMsg ? [forwardMsg] : null);
 
   return (
-    <main className="chat-area" aria-label={`Chat with ${name}`}>
+    <main className="chat-area" aria-label={t('chat.windowLabel', { name })}>
       <header className="chat-header">
-        <button className="icon-btn back-btn" onClick={onBack} aria-label="Back to list">
+        <button className="icon-btn back-btn" onClick={onBack} aria-label={t('chat.backToList')}>
           <Icon name="back" />
         </button>
         <button
           className="header-avatar-btn"
           onClick={onToggleDetails}
-          aria-label="Conversation info"
+          aria-label={t('chat.conversationInfo')}
           aria-pressed={detailsOpen}
-          title="Conversation info"
+          title={t('chat.conversationInfo')}
         >
           <UserAvatar
             avatarUrl={chat.type === 'Dm' ? (peerProfile.data?.avatarUrl ?? null) : chat.avatarUrl}
@@ -697,7 +701,7 @@ export function ChatWindow({
           className="chat-peer chat-peer-btn"
           onClick={onToggleDetails}
           aria-pressed={detailsOpen}
-          title="Conversation info"
+          title={t('chat.conversationInfo')}
         >
           <span className="chat-peer-name" dir="auto">{name}</span>
           <span className="chat-peer-status">
@@ -709,8 +713,8 @@ export function ChatWindow({
           <button
             className="icon-btn"
             onClick={onOpenSearch}
-            aria-label="Search in conversation"
-            title="Search"
+            aria-label={t('chat.searchInConversation')}
+            title={t('common.search')}
           >
             <Icon name="search" />
           </button>
@@ -718,8 +722,8 @@ export function ChatWindow({
             className="icon-btn"
             onClick={() => void startCall('Audio')}
             disabled={callBusy}
-            aria-label="Start voice call"
-            title="Voice call"
+            aria-label={t('chat.startVoiceCall')}
+            title={t('chat.voiceCall')}
           >
             <Icon name="phone" />
           </button>
@@ -727,17 +731,17 @@ export function ChatWindow({
             className="icon-btn"
             onClick={() => void startCall('Video')}
             disabled={callBusy}
-            aria-label="Start video call"
-            title="Video call"
+            aria-label={t('chat.startVideoCall')}
+            title={t('chat.videoCall')}
           >
             <Icon name="video" />
           </button>
           <button
             className="icon-btn"
             onClick={onToggleDetails}
-            aria-label="Conversation info"
+            aria-label={t('chat.conversationInfo')}
             aria-pressed={detailsOpen}
-            title="More"
+            title={t('chat.more')}
           >
             <Icon name="dots" />
           </button>
@@ -746,7 +750,7 @@ export function ChatWindow({
       {callError ? (
         <div className="call-error" role="alert">
           <span>{callError}</span>
-          <button className="icon-btn" aria-label="Dismiss" onClick={() => setCallError(null)}>
+          <button className="icon-btn" aria-label={t('common.close')} onClick={() => setCallError(null)}>
             <Icon name="close" size={14} />
           </button>
         </div>
@@ -754,7 +758,7 @@ export function ChatWindow({
       {actionError ? (
         <div className="action-error" role="alert">
           <span>{actionError}</span>
-          <button className="icon-btn" aria-label="Dismiss" onClick={() => setActionError(null)}>
+          <button className="icon-btn" aria-label={t('common.close')} onClick={() => setActionError(null)}>
             <Icon name="close" size={14} />
           </button>
         </div>
@@ -763,14 +767,14 @@ export function ChatWindow({
       {pins.length > 0 ? (
         <div className="pin-bar" role="note">
           <Icon name="pin" size={15} />
-          <span className="pin-text">{pins[pins.length - 1]?.body.slice(0, 120) ?? 'Pinned message'}</span>
-          <span className="pin-count">{pins.length} pinned</span>
+          <span className="pin-text">{pins[pins.length - 1]?.body.slice(0, 120) ?? t('chat.pinnedMessage')}</span>
+          <span className="pin-count">{t('chat.pinnedCount', { count: pins.length })}</span>
         </div>
       ) : null}
 
       {selecting ? (
-        <div className="selection-bar" role="toolbar" aria-label="Message selection">
-          <span>{selected.size} selected</span>
+        <div className="selection-bar" role="toolbar" aria-label={t('chat.selectionLabel')}>
+          <span>{t('chat.selectedCount', { count: selected.size })}</span>
           <span className="selection-actions">
             <button
               className="ghost-btn inline"
@@ -779,13 +783,13 @@ export function ChatWindow({
                 if (items.length > 0) setForwardMany(items);
               }}
             >
-              Forward
+              {t('chat.forward')}
             </button>
             <button className="ghost-btn inline danger-text" onClick={() => setBulkConfirm(true)}>
-              Delete
+              {t('chat.delete')}
             </button>
             <button className="ghost-btn inline" onClick={() => setSelected(new Set())}>
-              Cancel
+              {t('common.cancel')}
             </button>
           </span>
         </div>
@@ -817,17 +821,17 @@ export function ChatWindow({
       >
         {dragging ? (
           <div className="drop-overlay" aria-hidden="true">
-            <span>Drop to attach</span>
+            <span>{t('chat.dropToAttach')}</span>
           </div>
         ) : null}
         {history.isPending ? (
-          <EmptyState title="Loading messages" hint="Fetching history from the server…" />
+          <EmptyState title={t('chat.loadingMessages')} hint={t('chat.fetchingHistory')} />
         ) : null}
         {history.isError ? (
           <div className="history-error">
-            <p>Could not load history.</p>
+            <p>{t('chat.historyFailed')}</p>
             <button className="ghost-btn inline" onClick={() => void history.refetch()}>
-              Retry
+              {t('common.retry')}
             </button>
           </div>
         ) : null}
@@ -837,13 +841,13 @@ export function ChatWindow({
             onClick={() => void history.fetchNextPage()}
             disabled={history.isFetchingNextPage}
           >
-            {history.isFetchingNextPage ? 'Loading…' : 'Load older messages'}
+            {history.isFetchingNextPage ? t('common.loading') : t('chat.loadOlder')}
           </button>
         ) : null}
         {!history.isPending && flat.length === 0 ? (
           <EmptyState
-            title="No messages yet"
-            hint="Say hello — it will appear here instantly."
+            title={t('chat.noMessages')}
+            hint={t('chat.noMessagesHint')}
             icon="emoji"
           />
         ) : null}
@@ -920,7 +924,7 @@ export function ChatWindow({
                   <input
                     type="checkbox"
                     className="select-box"
-                    aria-label="Select message"
+                    aria-label={t('chat.selectMessage')}
                     checked={selected.has(m.id)}
                     onChange={() => toggleSelect(m.id)}
                   />
@@ -929,39 +933,39 @@ export function ChatWindow({
                   className={`bubble${m.sending ? ' sending' : ''}${m.failed ? ' failed' : ''}${flashId === m.id ? ' flash' : ''}${isTail ? ' tail' : ''}${mediaOnly ? ' bubble-media' : ''}`}
                   onContextMenu={(e) => openMenu(e, m)}
                   role="article"
-                  aria-label={mine ? 'Your message' : `Message from ${m.senderName ?? 'peer'}`}
+                  aria-label={mine ? t('chat.yourMessage') : t('chat.messageFrom', { name: m.senderName ?? m.senderUsername ?? t('chat.unknown') })}
                 >
-                  {showName ? <div className="bubble-sender" style={{ color: colorFor(m.senderId ?? '?') }}>{m.senderName ?? m.senderUsername ?? 'Unknown'}</div> : null}
+                  {showName ? <div className="bubble-sender" style={{ color: colorFor(m.senderId ?? '?') }}>{m.senderName ?? m.senderUsername ?? t('chat.unknown')}</div> : null}
                   {m.forwardFrom ? (
                     <div className="bubble-forward">
                       <Icon name="forward" size={12} />
-                      Forwarded message
+                      {t('chat.forwardedMessage')}
                     </div>
                   ) : null}
                   {m.replyTo ? (
                     m.replyTo.isDeleted || !byId.has(m.replyTo.messageId) ? (
                       <div
                         className="bubble-reply"
-                        title={m.replyTo.isDeleted ? 'Original message was deleted' : 'Original message is not loaded'}
+                        title={m.replyTo.isDeleted ? t('chat.replyDeletedOriginal') : t('chat.replyNotLoaded')}
                       >
-                        <span className="bubble-reply-name">{m.replyTo.senderName ?? 'Message'}</span>
+                        <span className="bubble-reply-name">{m.replyTo.senderName ?? t('chat.messageWord')}</span>
                         <span className="bubble-reply-text" dir="auto">
-                          {m.replyTo.isDeleted ? 'Message deleted' : m.replyTo.preview}
+                          {m.replyTo.isDeleted ? t('chat.messageDeleted') : m.replyTo.preview}
                         </span>
                       </div>
                     ) : (
                       <button
                         type="button"
                         className="bubble-reply"
-                        title="Go to original message"
+                        title={t('chat.goToOriginal')}
                         onClick={() => jumpToMessage(m.replyTo!.messageId)}
                       >
-                        <span className="bubble-reply-name">{m.replyTo.senderName ?? 'Message'}</span>
+                        <span className="bubble-reply-name">{m.replyTo.senderName ?? t('chat.messageWord')}</span>
                         <span className="bubble-reply-text" dir="auto">{m.replyTo.preview}</span>
                       </button>
                     )
                   ) : null}
-                  <span dir="auto">{m.isDeleted ? <i>Message deleted</i> : <MessageBody body={m.body} />}</span>
+                  <span dir="auto">{m.isDeleted ? <i>{t('chat.messageDeleted')}</i> : <MessageBody body={m.body} />}</span>
                   {!m.isDeleted && m.attachment ? (
                     <AttachmentView message={m} onOpenImage={setViewer} />
                   ) : null}
@@ -979,7 +983,7 @@ export function ChatWindow({
                   ) : null}
                   {m.replyCount > 0 ? (
                     <button className="thread-link" onClick={() => setThreadParent(m)}>
-                      {m.replyCount} {m.replyCount === 1 ? 'reply' : 'replies'}
+                      {m.replyCount === 1 ? t('chat.replyOne') : t('chat.replies', { count: m.replyCount })}
                       <Icon name="chevron" size={12} />
                     </button>
                   ) : null}
@@ -990,7 +994,7 @@ export function ChatWindow({
                           key={r.emoji}
                           className={`reaction-chip${r.mine ? ' mine' : ''}`}
                           onClick={() => void react(m, r.emoji)}
-                          title={r.mine ? 'Remove your reaction' : 'React too'}
+                          title={r.mine ? t('chat.removeReaction') : t('chat.reactToo')}
                           disabled={m.isDeleted}
                         >
                           {r.emoji} {r.count}
@@ -999,18 +1003,18 @@ export function ChatWindow({
                     </div>
                   ) : null}
                   <div className={`bubble-meta${mediaOnly ? ' overlay' : ''}`}>
-                    {m.isEdited && !m.isDeleted ? <span>edited</span> : null}
+                    {m.isEdited && !m.isDeleted ? <span>{t('chat.edited')}</span> : null}
                     {!m.isDeleted && chat.pinnedMessageIds.includes(m.id) ? (
-                      <span className="pin-badge" title="Pinned message">
+                      <span className="pin-badge" title={t('chat.pinnedMessage')}>
                         <Icon name="pin" size={11} />
-                        Pinned
+                        {t('chat.pinned')}
                       </span>
                     ) : null}
-                    <span>{m.seq > 0 ? formatTime(m.createdAt) : 'sending…'}</span>
+                    <span>{m.seq > 0 ? formatTime(m.createdAt) : t('chat.sending')}</span>
                     {mine && m.seq > 0 ? (
                       <span
                         className={`ticks${delivered ? ' delivered' : ''}`}
-                        aria-label={read ? 'Read' : delivered ? 'Delivered' : 'Sent'}
+                        aria-label={read ? t('chat.read') : delivered ? t('chat.delivered') : t('chat.sent')}
                       >
                         <Icon name={read || delivered ? 'checks' : 'check'} size={14} />
                       </span>
@@ -1018,12 +1022,12 @@ export function ChatWindow({
                   </div>
                   {m.failed ? (
                     <button className="ghost-btn inline retry-btn" onClick={() => void retry(m)}>
-                      Retry send
+                      {t('chat.retrySend')}
                     </button>
                   ) : null}
                   <button
                     className="bubble-menu-btn"
-                    aria-label="Message actions"
+                    aria-label={t('chat.messageActions')}
                     onClick={(e) => {
                       const r = (e.target as HTMLElement).getBoundingClientRect();
                       setMenu({ msg: m, x: r.left, y: r.bottom });
@@ -1043,7 +1047,7 @@ export function ChatWindow({
               <i />
               <i />
             </span>
-            typing…
+            {t('chat.typing')}
           </div>
         ) : null}
       </div>
@@ -1052,8 +1056,8 @@ export function ChatWindow({
         <button
           className="scroll-fab"
           onClick={scrollToBottom}
-          aria-label={belowCount > 0 ? `Scroll to bottom, ${belowCount} new messages` : 'Scroll to bottom'}
-          title="Scroll to bottom"
+          aria-label={belowCount > 0 ? t('chat.scrollNew', { count: belowCount }) : t('chat.scrollBottom')}
+          title={t('chat.scrollBottom')}
         >
           <Icon name="down" size={20} />
           {belowCount > 0 ? <span className="scroll-count">{belowCount > 99 ? '99+' : belowCount}</span> : null}
@@ -1064,10 +1068,10 @@ export function ChatWindow({
       {replyTo ? (
         <div className="reply-bar">
           <div>
-            <div className="reply-title">Replying to {replyTo.senderName ?? 'message'}</div>
+            <div className="reply-title">{t('chat.replyingTo', { name: replyTo.senderName ?? t('chat.messageWord') })}</div>
             <div className="reply-preview">{replyTo.body.slice(0, 140)}</div>
           </div>
-          <button className="icon-btn" aria-label="Cancel reply" onClick={() => setReplyTo(null)}>
+          <button className="icon-btn" aria-label={t('chat.cancelReply')} onClick={() => setReplyTo(null)}>
             <Icon name="close" size={16} />
           </button>
         </div>
@@ -1075,12 +1079,12 @@ export function ChatWindow({
       {editing ? (
         <div className="reply-bar editing">
           <div>
-            <div className="reply-title">Editing message</div>
+            <div className="reply-title">{t('chat.editingMessage')}</div>
             <div className="reply-preview">{editing.body.slice(0, 140)}</div>
           </div>
           <button
             className="icon-btn"
-            aria-label="Cancel edit"
+            aria-label={t('chat.cancelEdit')}
             onClick={() => {
               setEditing(null);
               setDraft('');
@@ -1105,15 +1109,15 @@ export function ChatWindow({
                 <span className="hint">
                   {pending.meta.id
                     ? formatSize(pending.meta.sizeBytes)
-                    : `Uploading… ${Math.round(pending.progress * 100)}%`}
+                    : t('chat.uploading', { percent: Math.round(pending.progress * 100) })}
                 </span>
               </span>
               {uploading || !pending.meta.id ? (
-                <span className="progress-track" aria-label="Upload progress">
+                <span className="progress-track" aria-label={t('chat.uploadProgress')}>
                   <span className="progress-fill" style={{ width: `${Math.round(pending.progress * 100)}%` }} />
                 </span>
               ) : null}
-              <button className="icon-btn" aria-label="Remove attachment" onClick={clearPending}>
+              <button className="icon-btn" aria-label={t('chat.removeAttachment')} onClick={clearPending}>
                 <Icon name="close" size={16} />
               </button>
             </div>
@@ -1123,15 +1127,15 @@ export function ChatWindow({
       ) : null}
 
       {voice.state === 'recording' ? (
-        <div className="voice-bar" role="status" aria-label="Recording voice message">
+        <div className="voice-bar" role="status" aria-label={t('chat.recordingLabel')}>
           <span className="voice-dot" aria-hidden="true" />
           <span className="voice-time">{formatVoiceTime(voice.seconds)}</span>
-          <span className="voice-hint">Recording…</span>
+          <span className="voice-hint">{t('chat.recording')}</span>
           <button
             type="button"
             className="icon-btn"
-            aria-label="Cancel recording"
-            title="Cancel"
+            aria-label={t('chat.cancelRecording')}
+            title={t('common.cancel')}
             onClick={() => void voice.cancel()}
           >
             <Icon name="trash" size={18} />
@@ -1139,8 +1143,8 @@ export function ChatWindow({
           <button
             type="button"
             className="send-btn"
-            aria-label="Stop and attach voice message"
-            title="Stop and attach"
+            aria-label={t('chat.stopAndAttach')}
+            title={t('chat.stopAttach')}
             onClick={() =>
               void voice.stop().then((file) => {
                 if (file) void uploadAndStage(file);
@@ -1156,7 +1160,7 @@ export function ChatWindow({
         <div className="form-error" role="alert">
           {voice.error}{' '}
           <button type="button" className="ghost-btn inline small" onClick={voice.clearError}>
-            Dismiss
+            {t('common.close')}
           </button>
         </div>
       ) : null}
@@ -1192,8 +1196,8 @@ export function ChatWindow({
           <button
             type="button"
             className="icon-btn"
-            aria-label="Attach file"
-            title="Attach file"
+            aria-label={t('chat.attachFile')}
+            title={t('chat.attachFile')}
             disabled={uploading}
             onClick={() => fileInputRef.current?.click()}
           >
@@ -1202,8 +1206,8 @@ export function ChatWindow({
           <button
             type="button"
             className="icon-btn"
-            aria-label="Send GIF"
-            title="Send GIF"
+            aria-label={t('chat.sendGif')}
+            title={t('chat.sendGif')}
             disabled={uploading}
             onClick={() => gifInputRef.current?.click()}
           >
@@ -1226,16 +1230,16 @@ export function ChatWindow({
               }
             }}
             onBlur={() => pushTyping(false)}
-            placeholder={editing ? 'Edit message…' : pending ? 'Add a caption…' : 'Message'}
-            aria-label="Message composer"
+            placeholder={editing ? t('chat.editPlaceholder') : pending ? t('chat.captionPlaceholder') : t('chat.messagePlaceholder')}
+            aria-label={t('chat.composerLabel')}
             enterKeyHint="send"
             maxLength={4000}
           />
           <button
             type="button"
             className="icon-btn"
-            aria-label="Insert emoji"
-            title="Emoji"
+            aria-label={t('chat.insertEmoji')}
+            title={t('chat.emoji')}
             aria-expanded={emojiOpen}
             onClick={() => setEmojiOpen((v) => !v)}
           >
@@ -1244,7 +1248,7 @@ export function ChatWindow({
           {(draft.trim() !== '' || editing || pending?.meta.id) && canPost ? (
             <button
               className="send-btn"
-              aria-label="Send"
+              aria-label={t('chat.send')}
               disabled={uploading}
             >
               <Icon name="send" />
@@ -1253,8 +1257,8 @@ export function ChatWindow({
             <button
               type="button"
               className="send-btn recording"
-              aria-label="Stop recording"
-              title="Stop"
+              aria-label={t('chat.stopRecording')}
+              title={t('chat.stop')}
               onClick={() =>
                 void voice.stop().then((file) => {
                   if (file) void uploadAndStage(file);
@@ -1267,8 +1271,8 @@ export function ChatWindow({
             <button
               type="button"
               className="send-btn mic-btn"
-              aria-label="Record voice message"
-              title="Voice message"
+              aria-label={t('chat.recordVoice')}
+              title={t('chat.voiceMessage')}
               disabled={uploading}
               onClick={() => void voice.start()}
             >
@@ -1276,12 +1280,12 @@ export function ChatWindow({
             </button>
           )}
           {emojiOpen ? (
-            <div className="emoji-pop" role="dialog" aria-label="Insert emoji">
+            <div className="emoji-pop" role="dialog" aria-label={t('chat.insertEmoji')}>
               {[...QUICK_EMOJIS, ...MORE_EMOJIS].map((e) => (
                 <button
                   key={e}
                   type="button"
-                  aria-label={`Insert ${e}`}
+                  aria-label={t('chat.insertEmojiName', { emoji: e })}
                   onClick={() => {
                     setDraft((d) => `${d}${e}`);
                     pushTyping(true);
@@ -1295,7 +1299,7 @@ export function ChatWindow({
           ) : null}
         </form>
       ) : (
-        <div className="composer readonly">Only admins can post in this channel.</div>
+        <div className="composer readonly">{t('chat.readonlyChannel')}</div>
       )}
       </div>
 
@@ -1310,12 +1314,12 @@ export function ChatWindow({
             onClick={(e) => e.stopPropagation()}
           >
             {!menu.msg.isDeleted ? (
-              <div className="quick-react" role="group" aria-label="Quick reactions">
+              <div className="quick-react" role="group" aria-label={t('chat.quickReactions')}>
                 {QUICK_EMOJIS.map((e) => (
                   <button
                     key={e}
                     className="quick-emoji"
-                    aria-label={`React ${e}`}
+                    aria-label={t('chat.reactWith', { emoji: e })}
                     onClick={() => {
                       setMenu(null);
                       void react(menu.msg, e);
@@ -1327,12 +1331,12 @@ export function ChatWindow({
               </div>
             ) : null}
             {!menu.msg.isDeleted ? (
-              <div className="quick-react more" role="group" aria-label="More reactions">
+              <div className="quick-react more" role="group" aria-label={t('chat.moreReactions')}>
                 {MORE_EMOJIS.map((e) => (
                   <button
                     key={e}
                     className="quick-emoji"
-                    aria-label={`React ${e}`}
+                    aria-label={t('chat.reactWith', { emoji: e })}
                     onClick={() => {
                       setMenu(null);
                       void react(menu.msg, e);
@@ -1351,7 +1355,7 @@ export function ChatWindow({
               disabled={menu.msg.isDeleted}
             >
               <Icon name="reply" size={16} />
-              Reply
+              {t('chat.reply')}
             </button>
             {menu.msg.replyCount > 0 || menu.msg.replyTo ? (
               <button
@@ -1362,7 +1366,7 @@ export function ChatWindow({
                 }}
               >
                 <Icon name="chevron" size={16} />
-                View thread
+                {t('chat.viewThread')}
               </button>
             ) : null}
             <button
@@ -1373,7 +1377,7 @@ export function ChatWindow({
               disabled={menu.msg.isDeleted}
             >
               <Icon name="forward" size={16} />
-              Forward
+              {t('chat.forward')}
             </button>
             <button
               onClick={() => {
@@ -1382,7 +1386,7 @@ export function ChatWindow({
               }}
             >
               <Icon name="checks" size={16} />
-              Select
+              {t('chat.select')}
             </button>
             <button
               onClick={() => {
@@ -1392,7 +1396,7 @@ export function ChatWindow({
               disabled={menu.msg.isDeleted}
             >
               <Icon name="copy" size={16} />
-              Copy
+              {t('chat.copy')}
             </button>
             {menu.msg.senderId === myUserId && !menu.msg.isDeleted ? (
               <button
@@ -1403,7 +1407,7 @@ export function ChatWindow({
                 }}
               >
                 <Icon name="edit" size={16} />
-                Edit
+                {t('chat.edit')}
               </button>
             ) : null}
             {!menu.msg.isDeleted && (menu.msg.senderId === myUserId || isAdmin) ? (
@@ -1415,13 +1419,13 @@ export function ChatWindow({
                 }}
               >
                 <Icon name="trash" size={16} />
-                Delete…
+                {t('chat.deleteMenu')}
               </button>
             ) : null}
             {(isAdmin || chat.type === 'Dm') && !menu.msg.isDeleted ? (
               <button onClick={() => void togglePin(menu.msg)}>
                 <Icon name="pin" size={16} />
-                {chat.pinnedMessageIds.includes(menu.msg.id) ? 'Unpin' : 'Pin'}
+                {chat.pinnedMessageIds.includes(menu.msg.id) ? t('chat.unpin') : t('chat.pin')}
               </button>
             ) : null}
             {menu.msg.seq > 0 ? (
@@ -1437,7 +1441,7 @@ export function ChatWindow({
                   }}
                 >
                   <Icon name="checks" size={16} />
-                  Mark unread from here
+                  {t('chat.markUnreadFromHere')}
                 </button>
               </>
             ) : null}
@@ -1447,12 +1451,12 @@ export function ChatWindow({
 
       {forwardPickerItems ? (
         <div className="dialog-backdrop" onClick={() => { setForwardMsg(null); setForwardMany(null); setForwardError(null); }} role="presentation">
-          <div className="dialog" role="dialog" aria-modal="true" aria-label="Forward message" onClick={(e) => e.stopPropagation()}>
-            <h2>Forward {forwardPickerItems.length > 1 ? `${forwardPickerItems.length} messages` : ''} to…</h2>
+          <div className="dialog" role="dialog" aria-modal="true" aria-label={t('chat.forwardTitle')} onClick={(e) => e.stopPropagation()}>
+            <h2>{forwardPickerItems.length > 1 ? t('chat.forwardManyTo', { count: forwardPickerItems.length }) : t('chat.forwardOneTo')}</h2>
             <p className="hint">
               “{forwardPickerItems[0]?.body.slice(0, 120) ||
                 forwardPickerItems[0]?.attachment?.fileName ||
-                'Attachment'}”
+                t('chat.attachment')}”
             </p>
             <div className="picker-list">
               {chats
@@ -1470,10 +1474,10 @@ export function ChatWindow({
                 ))}
             </div>
             {forwardError ? <div className="form-error" role="alert">{forwardError}</div> : null}
-            {forwarding ? <p className="hint" role="status">Forwarding…</p> : null}
+            {forwarding ? <p className="hint" role="status">{t('chat.forwarding')}</p> : null}
             <div className="row-actions">
               <button className="ghost-btn inline" onClick={() => { setForwardMsg(null); setForwardMany(null); setForwardError(null); }}>
-                Cancel
+                {t('common.cancel')}
               </button>
             </div>
           </div>
@@ -1482,25 +1486,25 @@ export function ChatWindow({
 
       {deleteTarget ? (
         <div className="dialog-backdrop" onClick={() => { if (!deleting) setDeleteTarget(null); }} role="presentation">
-          <div className="dialog" role="dialog" aria-modal="true" aria-label="Delete message" onClick={(e) => e.stopPropagation()}>
-            <h2>Delete message?</h2>
+          <div className="dialog" role="dialog" aria-modal="true" aria-label={t('chat.deleteTitle')} onClick={(e) => e.stopPropagation()}>
+            <h2>{t('chat.deleteHeading')}</h2>
             <p className="hint">
-              “{deleteTarget.body.slice(0, 120) || deleteTarget.attachment?.fileName || 'Attachment'}”
+              “{deleteTarget.body.slice(0, 120) || deleteTarget.attachment?.fileName || t('chat.attachment')}”
             </p>
             <p className="hint">
-              This deletes the message <strong>for everyone</strong> in this conversation.
-              This cannot be undone.
+              {t('chat.deleteHint1')} <strong>{t('chat.deleteHintStrong')}</strong>{' '}
+              {t('chat.deleteHint2')}
             </p>
             <div className="row-actions">
               <button className="ghost-btn inline" disabled={deleting} onClick={() => setDeleteTarget(null)}>
-                Cancel
+                {t('common.cancel')}
               </button>
               <button
                 className="ghost-btn inline danger-text"
                 disabled={deleting}
                 onClick={() => void confirmDelete()}
               >
-                {deleting ? 'Deleting…' : 'Delete for everyone'}
+                {deleting ? t('chat.deleting') : t('chat.deleteForEveryone')}
               </button>
             </div>
           </div>
@@ -1509,23 +1513,22 @@ export function ChatWindow({
 
       {bulkConfirm ? (
         <div className="dialog-backdrop" onClick={() => { if (!bulkDeleting) setBulkConfirm(false); }} role="presentation">
-          <div className="dialog" role="dialog" aria-modal="true" aria-label="Delete selected messages" onClick={(e) => e.stopPropagation()}>
-            <h2>Delete {selected.size} {selected.size === 1 ? 'message' : 'messages'}?</h2>
+          <div className="dialog" role="dialog" aria-modal="true" aria-label={t('chat.bulkDeleteTitle')} onClick={(e) => e.stopPropagation()}>
+            <h2>{selected.size === 1 ? t('chat.bulkDeleteOne') : t('chat.bulkDeleteMany', { count: selected.size })}</h2>
             <p className="hint">
-              This deletes the selected messages <strong>for everyone</strong> in this conversation.
-              Messages you are not allowed to delete will abort the whole batch — nothing is
-              deleted partially. This cannot be undone.
+              {t('chat.bulkHint1')} <strong>{t('chat.bulkHintStrong')}</strong>{' '}
+              {t('chat.bulkHint2')}
             </p>
             <div className="row-actions">
               <button className="ghost-btn inline" disabled={bulkDeleting} onClick={() => setBulkConfirm(false)}>
-                Cancel
+                {t('common.cancel')}
               </button>
               <button
                 className="ghost-btn inline danger-text"
                 disabled={bulkDeleting || selected.size === 0}
                 onClick={() => void confirmBulkDelete()}
               >
-                {bulkDeleting ? 'Deleting…' : 'Delete for everyone'}
+                {bulkDeleting ? t('chat.deleting') : t('chat.deleteForEveryone')}
               </button>
             </div>
           </div>
@@ -1533,25 +1536,25 @@ export function ChatWindow({
       ) : null}
 
       {threadParent ? (
-        <aside className="thread-drawer" aria-label="Reply thread">
+        <aside className="thread-drawer" aria-label={t('chat.threadLabel')}>
           <header className="thread-head">
-            <strong>Thread</strong>
-            <button className="icon-btn" aria-label="Close thread" onClick={() => setThreadParent(null)}>
+            <strong>{t('chat.thread')}</strong>
+            <button className="icon-btn" aria-label={t('chat.closeThread')} onClick={() => setThreadParent(null)}>
               <Icon name="close" size={16} />
             </button>
           </header>
-          <div className="thread-parent">{threadParent.isDeleted ? 'Message deleted' : threadParent.body.slice(0, 200)}</div>
+          <div className="thread-parent">{threadParent.isDeleted ? t('chat.messageDeleted') : threadParent.body.slice(0, 200)}</div>
           <div className="thread-list">
-            {threadQuery.isPending ? <p className="hint">Loading replies…</p> : null}
+            {threadQuery.isPending ? <p className="hint">{t('chat.loadingReplies')}</p> : null}
             {(threadQuery.data ?? []).map((r) => (
               <div key={r.id} className="thread-item">
-                <span className="thread-author">{r.senderName ?? r.senderUsername ?? 'Unknown'}</span>
-                <span>{r.isDeleted ? <i>Message deleted</i> : r.body}</span>
+                <span className="thread-author">{r.senderName ?? r.senderUsername ?? t('chat.unknown')}</span>
+                <span>{r.isDeleted ? <i>{t('chat.messageDeleted')}</i> : r.body}</span>
                 <span className="thread-time">{formatTime(r.createdAt)}</span>
               </div>
             ))}
             {threadQuery.isSuccess && (threadQuery.data ?? []).length === 0 ? (
-              <p className="hint">No replies yet — reply to start the thread.</p>
+              <p className="hint">{t('chat.noReplies')}</p>
             ) : null}
           </div>
           <div className="row-actions">
@@ -1562,7 +1565,7 @@ export function ChatWindow({
                 setThreadParent(null);
               }}
             >
-              Reply in thread
+              {t('chat.replyInThread')}
             </button>
           </div>
         </aside>

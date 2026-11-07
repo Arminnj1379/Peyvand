@@ -3,6 +3,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { chatApi } from '../features/chats/chatApi';
 import type { Chat } from '../features/chats/chatTypes';
 import { ApiError, apiClient } from '../shared/api/client';
+import { useT } from '../shared/i18n';
 import { useEscape } from '../shared/ui/useEscape';
 
 interface FoundUser {
@@ -23,6 +24,7 @@ export function NewChatDialog({
   onCreated: (chatId: string) => void;
 }) {
   const queryClient = useQueryClient();
+  const t = useT();
   const closeRef = useRef(onClose);
   closeRef.current = onClose;
   useEscape(true, () => closeRef.current());
@@ -67,17 +69,17 @@ export function NewChatDialog({
       if (tab === 'dm') {
         const peer = selected[0];
         if (!peer) {
-          setError('Pick a person to message.');
+          setError(t('newchat.errPickPerson'));
           return;
         }
         chat = await chatApi.createDm(peer.id);
       } else if (tab === 'group') {
         if (!title.trim()) {
-          setError('Give the group a title.');
+          setError(t('newchat.errGroupTitle'));
           return;
         }
         if (selected.length === 0) {
-          setError('Add at least one member.');
+          setError(t('newchat.errAddMember'));
           return;
         }
         chat = await chatApi.createGroup({
@@ -87,11 +89,11 @@ export function NewChatDialog({
         });
       } else {
         if (!title.trim()) {
-          setError('Give the channel a title.');
+          setError(t('newchat.errChannelTitle'));
           return;
         }
         if (isPublic && !/^[a-z0-9_]{5,32}$/i.test(username.trim())) {
-          setError('Public channels need a username (5-32 chars: letters, digits, _).');
+          setError(t('newchat.errUsername'));
           return;
         }
         chat = await chatApi.createChannel({
@@ -104,7 +106,7 @@ export function NewChatDialog({
       await queryClient.invalidateQueries({ queryKey: ['chats'] });
       onCreated(chat.id);
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : 'Could not create the conversation.');
+      setError(e instanceof ApiError ? e.message : t('newchat.errCreate'));
     } finally {
       setBusy(false);
     }
@@ -116,50 +118,50 @@ export function NewChatDialog({
         className="dialog"
         role="dialog"
         aria-modal="true"
-        aria-label="New conversation"
+        aria-label={t('newchat.title')}
         onClick={(e) => e.stopPropagation()}
       >
-        <h2>New conversation</h2>
+        <h2>{t('newchat.title')}</h2>
         <div className="folder-tabs" role="tablist">
-          {(['dm', 'group', 'channel'] as Tab[]).map((t) => (
+          {(['dm', 'group', 'channel'] as Tab[]).map((tb) => (
             <button
-              key={t}
+              key={tb}
               role="tab"
-              aria-selected={tab === t}
-              className={`folder-tab${tab === t ? ' active' : ''}`}
+              aria-selected={tab === tb}
+              className={`folder-tab${tab === tb ? ' active' : ''}`}
               onClick={() => {
-                setTab(t);
+                setTab(tb);
                 setSelected([]);
                 setError(null);
               }}
             >
-              {t === 'dm' ? 'Direct' : t === 'group' ? 'Group' : 'Channel'}
+              {tb === 'dm' ? t('newchat.tabDm') : tb === 'group' ? t('newchat.tabGroup') : t('newchat.tabChannel')}
             </button>
           ))}
         </div>
 
         {tab !== 'dm' ? (
           <div className="field">
-            <label htmlFor="newchat-title">Title</label>
+            <label htmlFor="newchat-title">{t('newchat.titleLabel')}</label>
             <input
               id="newchat-title"
               value={title}
               onChange={(e) => setTitle(e.target.value)}
               maxLength={64}
-              placeholder={tab === 'group' ? 'Group name' : 'Channel name'}
+              placeholder={tab === 'group' ? t('newchat.groupNamePh') : t('newchat.channelNamePh')}
             />
           </div>
         ) : null}
 
         {tab === 'group' ? (
           <div className="field">
-            <label htmlFor="newchat-desc">Description (optional)</label>
+            <label htmlFor="newchat-desc">{t('newchat.descLabel')}</label>
             <input
               id="newchat-desc"
               value={description}
               onChange={(e) => setDescription(e.target.value)}
               maxLength={512}
-              placeholder="What is this group about?"
+              placeholder={t('newchat.descPh')}
             />
           </div>
         ) : null}
@@ -168,17 +170,17 @@ export function NewChatDialog({
           <>
             <label className="check">
               <input type="checkbox" checked={isPublic} onChange={(e) => setIsPublic(e.target.checked)} />
-              Public channel (joinable by username)
+              {t('newchat.publicCheck')}
             </label>
             {isPublic ? (
               <div className="field">
-                <label htmlFor="newchat-username">Username</label>
+                <label htmlFor="newchat-username">{t('newchat.usernameLabel')}</label>
                 <input
                   id="newchat-username"
                   value={username}
                   onChange={(e) => setUsername(e.target.value)}
                   maxLength={32}
-                  placeholder="e.g. opennews"
+                  placeholder={t('newchat.usernamePh')}
                 />
               </div>
             ) : null}
@@ -187,21 +189,21 @@ export function NewChatDialog({
 
         <div className="field">
           <label htmlFor="newchat-search">
-            {tab === 'dm' ? 'Find a person' : tab === 'group' ? 'Add members' : 'Add subscribers (optional)'}
+            {tab === 'dm' ? t('newchat.searchDm') : tab === 'group' ? t('newchat.searchGroup') : t('newchat.searchChannel')}
           </label>
           <input
             id="newchat-search"
             autoFocus
             value={search}
             onChange={(e) => void onSearch(e.target.value)}
-            placeholder="Type at least 2 characters…"
+            placeholder={t('newchat.searchPh')}
           />
         </div>
 
         {selected.length > 0 ? (
           <div className="chip-row">
             {selected.map((u) => (
-              <button key={u.id} className="chip" onClick={() => toggle(u)} title="Remove">
+              <button key={u.id} className="chip" onClick={() => toggle(u)} title={t('common.remove')}>
                 {u.displayName} ×
               </button>
             ))}
@@ -227,10 +229,10 @@ export function NewChatDialog({
         {error ? <div className="form-error">{error}</div> : null}
         <div className="row-actions">
           <button className="ghost-btn inline" onClick={onClose}>
-            Cancel
+            {t('common.cancel')}
           </button>
           <button className="primary-btn inline" onClick={() => void create()} disabled={busy}>
-            {busy ? 'Creating…' : 'Create'}
+            {busy ? t('newchat.creating') : t('newchat.create')}
           </button>
         </div>
       </div>

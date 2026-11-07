@@ -6,6 +6,7 @@ import { isAdmin, type User } from '../features/auth/authTypes';
 import { supportApi } from '../features/support/supportApi';
 import type { Ticket } from '../features/support/supportApi';
 import { ApiError } from '../shared/api/client';
+import { useLocaleTag, useT } from '../shared/i18n';
 import { EmptyState } from '../shared/ui/EmptyState';
 
 const NEXT: Record<string, string[]> = {
@@ -34,6 +35,8 @@ function TicketCard({
 }) {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const t = useT();
+  const localeTag = useLocaleTag();
 
   async function act(fn: () => Promise<Ticket>): Promise<void> {
     setBusy(true);
@@ -42,7 +45,7 @@ function TicketCard({
       await fn();
       onChanged();
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : 'Action failed.');
+      setError(e instanceof ApiError ? e.message : t('support.actionFailed'));
     } finally {
       setBusy(false);
     }
@@ -58,11 +61,11 @@ function TicketCard({
       </div>
       {ticket.description ? <p className="ticket-desc">{ticket.description}</p> : null}
       <p className="hint">
-        {ticket.customerName ?? 'Customer'}
-        {ticket.assigneeName ? ` · ${ticket.assigneeName}` : ' · unassigned'} ·{' '}
-        {new Date(ticket.createdAt).toLocaleString()}
+        {ticket.customerName ?? t('support.customer')}
+        {ticket.assigneeName ? ` · ${ticket.assigneeName}` : ` · ${t('support.unassigned')}`} ·{' '}
+        {new Date(ticket.createdAt).toLocaleString(localeTag)}
       </p>
-      {ticket.chatId ? <Link to={`/?chat=${ticket.chatId}`}>Open conversation ›</Link> : null}
+      {ticket.chatId ? <Link to={`/?chat=${ticket.chatId}`}>{t('support.openConversation')}</Link> : null}
       {next.length > 0 || (agent && !ticket.assigneeId && ticket.status !== 'Closed') ? (
         <div className="row-actions">
           {agent && !ticket.assigneeId && ticket.status !== 'Closed' ? (
@@ -71,7 +74,7 @@ function TicketCard({
               disabled={busy}
               onClick={() => void act(() => supportApi.assign(ticket.id))}
             >
-              Take ticket
+              {t('support.takeTicket')}
             </button>
           ) : null}
           {next.map((s) => (
@@ -81,7 +84,7 @@ function TicketCard({
               disabled={busy}
               onClick={() => void act(() => supportApi.setStatus(ticket.id, s))}
             >
-              {s === 'Closed' && ticket.customerId === myUserId ? 'Close (accept)' : s}
+              {s === 'Closed' && ticket.customerId === myUserId ? t('support.closeAccept') : s}
             </button>
           ))}
         </div>
@@ -92,6 +95,7 @@ function TicketCard({
 }
 
 export function SupportPage({ user }: { user: User | null }) {
+  const t = useT();
   const queryClient = useQueryClient();
   const agent = isAgent(user);
   const [statusFilter, setStatusFilter] = useState('Open');
@@ -119,7 +123,7 @@ export function SupportPage({ user }: { user: User | null }) {
       setDescription('');
       await queryClient.invalidateQueries({ queryKey: ['tickets'] });
     } catch (err) {
-      setFormError(err instanceof ApiError ? err.message : 'Could not open ticket.');
+      setFormError(err instanceof ApiError ? err.message : t('support.openFailed'));
     } finally {
       setFormBusy(false);
     }
@@ -128,11 +132,11 @@ export function SupportPage({ user }: { user: User | null }) {
   return (
     <div className="center-page">
       <div className="card wide">
-        <Link to="/">← Back to chats</Link>
-        <h1>{agent ? 'Support inbox' : 'Support'}</h1>
+        <Link to="/">{t('support.back')}</Link>
+        <h1>{agent ? t('support.inbox') : t('support.title')}</h1>
 
         {agent ? (
-          <nav className="folder-tabs" aria-label="Ticket status filter">
+          <nav className="folder-tabs" aria-label={t('support.filterLabel')}>
             {['Open', 'Assigned', 'InProgress', 'Resolved', 'Closed', 'All'].map((s) => (
               <button
                 key={s}
@@ -146,9 +150,9 @@ export function SupportPage({ user }: { user: User | null }) {
           </nav>
         ) : (
           <form onSubmit={(e) => void openTicket(e)}>
-            <h2>Contact support</h2>
+            <h2>{t('support.contact')}</h2>
             <div className="field">
-              <label htmlFor="sup-subject">Subject</label>
+              <label htmlFor="sup-subject">{t('support.subject')}</label>
               <input
                 id="sup-subject"
                 value={subject}
@@ -158,7 +162,7 @@ export function SupportPage({ user }: { user: User | null }) {
               />
             </div>
             <div className="field">
-              <label htmlFor="sup-desc">What happened?</label>
+              <label htmlFor="sup-desc">{t('support.whatHappened')}</label>
               <textarea
                 id="sup-desc"
                 value={description}
@@ -169,23 +173,23 @@ export function SupportPage({ user }: { user: User | null }) {
             </div>
             {formError ? <div className="form-error">{formError}</div> : null}
             <button className="primary-btn" type="submit" disabled={formBusy || subject.trim() === ''}>
-              {formBusy ? 'Opening…' : 'Open ticket'}
+              {formBusy ? t('support.opening') : t('support.openTicket')}
             </button>
           </form>
         )}
 
-        <h2>{agent ? `Queue (${tickets.length})` : 'My tickets'}</h2>
-        {ticketsQuery.isPending ? <p className="hint">Loading tickets…</p> : null}
+        <h2>{agent ? t('support.queue', { count: tickets.length }) : t('support.myTickets')}</h2>
+        {ticketsQuery.isPending ? <p className="hint">{t('support.loading')}</p> : null}
         {ticketsQuery.isError ? (
           <div>
-            <div className="form-error">Could not load tickets.</div>
+            <div className="form-error">{t('support.loadFailed')}</div>
             <button className="ghost-btn inline" onClick={() => void ticketsQuery.refetch()}>
-              Retry
+              {t('common.retry')}
             </button>
           </div>
         ) : null}
         {!ticketsQuery.isPending && tickets.length === 0 ? (
-          <EmptyState title="No tickets" hint={agent ? 'The queue is clear.' : 'Open one above and an agent will help.'} />
+          <EmptyState title={t('support.noTickets')} hint={agent ? t('support.queueClear') : t('support.openOne')} />
         ) : null}
         {tickets.map((t) => (
           <TicketCard

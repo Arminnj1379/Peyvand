@@ -18,12 +18,14 @@ import { JoinChannelDialog } from '../widgets/JoinChannelDialog';
 import { NewChatDialog } from '../widgets/NewChatDialog';
 import { SearchDialog } from '../widgets/SearchDialog';
 import { EmptyState } from '../shared/ui/EmptyState';
+import { useT } from '../shared/i18n';
 import { Toasts } from '../widgets/Toasts';
 import type { Toast } from '../widgets/Toasts';
 
 let toastId = 0;
 
 export function MessengerPage() {
+  const t = useT();
   const user = useAuthStore((s) => s.user);
   const accessToken = useAuthStore((s) => s.accessToken);
   const myUserId = user?.id;
@@ -95,13 +97,13 @@ export function MessengerPage() {
       if (m.chatId === activeIdRef.current) return;
       if (!useSettingsStore.getState().notificationsEnabled) return;
       const id = ++toastId;
-      const title = m.senderName ?? m.senderUsername ?? 'New message';
+      const title = m.senderName ?? m.senderUsername ?? t('messenger.newMessage');
       setToasts((prev) =>
         [...prev, { id, title, preview: m.body.slice(0, 120), chatId: m.chatId }].slice(-3),
       );
       window.setTimeout(() => dismissToast(id), 8000);
     },
-    [dismissToast],
+    [dismissToast, t],
   );
 
   const { status, typingIn, sendTyping, ackDelivered, isOnline, lastSeenAt } = useChatRealtime({
@@ -165,7 +167,7 @@ export function MessengerPage() {
   const typingNames = useMemo(() => {
     if (!active) return [];
     return typingIds
-      .map((id) => active.members.find((m) => m.userId === id)?.displayName ?? 'Someone')
+      .map((id) => active.members.find((m) => m.userId === id)?.displayName ?? t('messenger.someone'))
       .slice(0, 3);
   }, [typingIds, active]);
 
@@ -219,14 +221,14 @@ export function MessengerPage() {
         <div className={`conn-banner${status === 'disconnected' ? ' offline' : ''}`} role="status" aria-live="polite">
           <span className="conn-dot" aria-hidden="true" />
           <span className="conn-text">
-            {status === 'connecting' ? 'Connecting…' : 'No connection — retrying…'}
+            {status === 'connecting' ? t('messenger.connecting') : t('messenger.offline')}
           </span>
           {status === 'disconnected' ? (
             <button
               className="conn-retry"
               onClick={() => void queryClient.invalidateQueries({ queryKey: ['chats'] })}
             >
-              Retry
+              {t('common.retry')}
             </button>
           ) : null}
         </div>
@@ -253,18 +255,18 @@ export function MessengerPage() {
         className={`resize-handle${resizing ? ' dragging' : ''}`}
         role="separator"
         aria-orientation="vertical"
-        aria-label="Resize sidebar"
+        aria-label={t('messenger.resizeLabel')}
         onPointerDown={onResizePointerDown}
       />
       {chatsQuery.isError && chats.length === 0 ? (
         <main className="chat-area">
-          <EmptyState title="Could not load conversations" hint="Check your connection and retry." />
+          <EmptyState title={t('messenger.loadFailed')} hint={t('messenger.checkConnection')} />
           <div className="retry-row">
             <button
               className="ghost-btn inline"
               onClick={() => void queryClient.invalidateQueries({ queryKey: ['chats'] })}
             >
-              Retry
+              {t('common.retry')}
             </button>
           </div>
         </main>
@@ -286,11 +288,11 @@ export function MessengerPage() {
       ) : (
         <main className="chat-area">
           <EmptyState
-            title={chatsQuery.isPending ? 'Loading…' : 'Select a conversation'}
+            title={chatsQuery.isPending ? t('common.loading') : t('messenger.selectConversation')}
             hint={
               chatsQuery.isPending
-                ? 'Fetching your chats.'
-                : 'Choose a chat from the list, or start a new one.'
+                ? t('messenger.fetching')
+                : t('messenger.chooseHint')
             }
             icon={chatsQuery.isPending ? undefined : 'users'}
           />

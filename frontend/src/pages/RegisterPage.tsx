@@ -3,9 +3,11 @@ import type { FormEvent } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../features/auth/authStore';
 import { ApiError } from '../shared/api/client';
+import { useT } from '../shared/i18n';
 import { Icon } from '../shared/ui/Icon';
 
 export function RegisterPage() {
+  const t = useT();
   const navigate = useNavigate();
   const register = useAuthStore((s) => s.register);
   const [username, setUsername] = useState('');
@@ -19,7 +21,7 @@ export function RegisterPage() {
   async function onSubmit(e: FormEvent): Promise<void> {
     e.preventDefault();
     if (password !== confirm) {
-      setError('Passwords do not match.');
+      setError(t('register.mismatch'));
       return;
     }
     setError(null);
@@ -33,7 +35,7 @@ export function RegisterPage() {
       });
       await navigate('/');
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Registration failed.');
+      setError(err instanceof ApiError ? err.message : t('register.failed'));
     } finally {
       setBusy(false);
     }
@@ -45,24 +47,24 @@ export function RegisterPage() {
         <span className="brand-mark" aria-hidden="true">
           <Icon name="send" size={22} />
         </span>
-        <h1>Create account</h1>
-        <p>External customers can self-register. Employees are added by an administrator.</p>
+        <h1>{t('register.title')}</h1>
+        <p>{t('register.subtitle')}</p>
         <form onSubmit={(e) => void onSubmit(e)}>
           <div className="field">
-            <label htmlFor="reg-username">Username</label>
+            <label htmlFor="reg-username">{t('register.username')}</label>
             <input
               id="reg-username"
               value={username}
               onChange={(e) => setUsername(e.target.value)}
               autoComplete="username"
-              placeholder="lowercase, 3–32 chars"
+              placeholder={t('register.usernamePlaceholder')}
               required
               minLength={3}
               maxLength={32}
             />
           </div>
           <div className="field">
-            <label htmlFor="reg-name">Display name</label>
+            <label htmlFor="reg-name">{t('register.displayName')}</label>
             <input
               id="reg-name"
               value={displayName}
@@ -73,17 +75,17 @@ export function RegisterPage() {
             />
           </div>
           <div className="field">
-            <label htmlFor="reg-phone">Phone (optional)</label>
+            <label htmlFor="reg-phone">{t('register.phone')}</label>
             <input
               id="reg-phone"
               value={phone}
               onChange={(e) => setPhone(e.target.value)}
               autoComplete="tel"
-              placeholder="+989121234567"
+              placeholder={t('register.phonePlaceholder')}
             />
           </div>
           <div className="field">
-            <label htmlFor="reg-password">Password</label>
+            <label htmlFor="reg-password">{t('register.password')}</label>
             <input
               id="reg-password"
               type="password"
@@ -95,7 +97,7 @@ export function RegisterPage() {
             />
           </div>
           <div className="field">
-            <label htmlFor="reg-confirm">Confirm password</label>
+            <label htmlFor="reg-confirm">{t('register.confirm')}</label>
             <input
               id="reg-confirm"
               type="password"
@@ -107,11 +109,11 @@ export function RegisterPage() {
           </div>
           {error ? <div className="form-error">{error}</div> : null}
           <button className="primary-btn" type="submit" disabled={busy}>
-            {busy ? 'Creating…' : 'Create account'}
+            {busy ? t('register.creating') : t('register.create')}
           </button>
         </form>
         <p className="phase-note">
-          Already have an account? <Link to="/login">Sign in</Link>
+          {t('register.haveAccount')} <Link to="/login">{t('register.signin')}</Link>
         </p>
       </div>
     </div>

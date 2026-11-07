@@ -4,6 +4,7 @@ import { formatSize } from '../features/files/fileTypes';
 import type { Attachment } from '../features/files/fileTypes';
 import type { Message } from '../features/messages/messageTypes';
 import { Icon } from '../shared/ui/Icon';
+import { useT } from '../shared/i18n';
 import { MusicPlayer, VideoPlayer, VoicePlayer } from './players';
 
 /** Inline attachment rendering inside a bubble (images, video, audio, documents). */
@@ -16,6 +17,7 @@ export function AttachmentView({
 }) {
   const attachment = message.attachment;
   const url = useAttachmentUrl(attachment?.fileId, attachment?.kind ?? '');
+  const t = useT();
 
   if (!attachment || message.isDeleted) return null;
 
@@ -27,7 +29,7 @@ export function AttachmentView({
       <button
         className="attachment-image"
         onClick={() => onOpenImage(attachment)}
-        aria-label={`Open image ${attachment.fileName}`}
+        aria-label={t('viewer.openImage', { name: attachment.fileName })}
       >
         {url ? (
           <span className="attachment-img-wrap">
@@ -39,7 +41,7 @@ export function AttachmentView({
             ) : null}
           </span>
         ) : (
-          <span className="attachment-loading">Loading image…</span>
+          <span className="attachment-loading">{t('viewer.loadingImage')}</span>
         )}
       </button>
     );
@@ -51,7 +53,7 @@ export function AttachmentView({
         <VideoPlayer url={url} fileName={attachment.fileName} />
       </span>
     ) : (
-      <span className="attachment-loading">Loading video…</span>
+      <span className="attachment-loading">{t('viewer.loadingVideo')}</span>
     );
   }
 
@@ -66,7 +68,7 @@ export function AttachmentView({
         <MusicPlayer url={url} fileName={attachment.fileName} />
       )
     ) : (
-      <span className="attachment-loading">Loading audio…</span>
+      <span className="attachment-loading">{t('viewer.loadingAudio')}</span>
     );
   }
 
@@ -79,8 +81,8 @@ export function AttachmentView({
       </span>
       <button
         className="icon-btn"
-        aria-label={`Download ${attachment.fileName}`}
-        title="Download"
+        aria-label={t('viewer.downloadFile', { name: attachment.fileName })}
+        title={t('viewer.download')}
         onClick={() => void saveAttachment(attachment.fileId, attachment.fileName).catch(() => undefined)}
       >
         <Icon name="download" size={18} />
@@ -98,6 +100,7 @@ export function MediaViewer({
   onClose: () => void;
 }) {
   const url = useAttachmentUrl(attachment.fileId, attachment.kind);
+  const t = useT();
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -121,13 +124,13 @@ export function MediaViewer({
           <span className="viewer-actions">
             <button
               className="icon-btn"
-              aria-label="Download"
-              title="Download"
+              aria-label={t('viewer.download')}
+              title={t('viewer.download')}
               onClick={() => void saveAttachment(attachment.fileId, attachment.fileName).catch(() => undefined)}
             >
               <Icon name="download" />
             </button>
-            <button className="icon-btn" aria-label="Close viewer" onClick={onClose}>
+            <button className="icon-btn" aria-label={t('viewer.closeViewer')} onClick={onClose}>
               <Icon name="close" />
             </button>
           </span>
@@ -135,7 +138,7 @@ export function MediaViewer({
         {url ? (
           <img className="viewer-image" src={url} alt={attachment.fileName} />
         ) : (
-          <p className="hint">Loading…</p>
+          <p className="hint">{t('viewer.loading')}</p>
         )}
       </div>
     </div>

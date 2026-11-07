@@ -1,14 +1,17 @@
 import { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { callApi } from '../features/calls/callApi';
-import { callHistoryLabel } from '../features/calls/callTypes';
+import { formatCallDuration } from '../features/calls/callTypes';
 import { chatApi } from '../features/chats/chatApi';
 import { chatDisplayName, isChatAdmin } from '../features/chats/chatTypes';
 import type { Chat } from '../features/chats/chatTypes';
 import { ApiError, apiClient } from '../shared/api/client';
 import { UserAvatar } from '../shared/ui/UserAvatar';
 import { useUserQuery } from '../features/auth/useUser';
+import type { CallInfo } from '../features/calls/callTypes';
 import { Icon } from '../shared/ui/Icon';
+import { useT } from '../shared/i18n';
+import type { TFunction } from '../shared/i18n';
 
 interface FoundUser {
   id: string;
@@ -18,6 +21,45 @@ interface FoundUser {
 
 const ROLE_OPTIONS = ['Member', 'Admin', 'Owner'];
 const CHANNEL_ROLE_OPTIONS = ['Subscriber', 'Member', 'Admin', 'Owner'];
+
+function roleLabel(t: TFunction, role: string): string {
+  switch (role) {
+    case 'Member':
+      return t('details.roleMember');
+    case 'Admin':
+      return t('details.roleAdmin');
+    case 'Owner':
+      return t('details.roleOwner');
+    case 'Subscriber':
+      return t('details.roleSubscriber');
+    default:
+      return role;
+  }
+}
+
+/** Localized equivalent of callHistoryLabel (lives here to keep callTypes locale-free). */
+function historyLabel(t: TFunction, call: CallInfo, isOutgoing: boolean): string {
+  const video = call.mediaType === 'Video';
+  if (call.status !== 'Ended') return video ? t('call.historyVideo') : t('call.historyVoice');
+  if (call.endReason === 'Declined')
+    return video
+      ? isOutgoing
+        ? t('call.historyDeclinedVideo')
+        : t('call.historyMissedVideo')
+      : isOutgoing
+        ? t('call.historyDeclinedVoice')
+        : t('call.historyMissedVoice');
+  if (call.endReason === 'Cancelled')
+    return t(video ? 'call.historyCancelledVideo' : 'call.historyCancelledVoice');
+  return t('call.historyDone', {
+    kind: video ? t('call.historyVideo') : t('call.historyVoice'),
+    duration: formatCallDuration(call.durationSeconds),
+  });
+}
+
+function callStatusLabel(t: TFunction, status: CallInfo['status']): string {
+  return status === 'Ringing' ? t('call.statusRinging') : t('call.statusActive');
+}
 
 function colorFor(id: string): string {
   const colors = ['#2aabee', '#7b61ff', '#31b545', '#e8a13d', '#df3f40', '#009688'];
@@ -42,6 +84,7 @@ function MemberRow({
   onRemove: (userId: string) => void;
 }) {
   const profile = useUserQuery(member.userId);
+  const t = useT();
   return (
     <li className="member-row">
       <UserAvatar
@@ -57,27 +100,27 @@ function MemberRow({
       {admin && member.userId !== myUserId && chat.type !== 'Dm' ? (
         <span className="member-actions">
           <select
-            aria-label={`Role for ${member.displayName}`}
+            aria-label={t('details.roleFor', { name: member.displayName })}
             value={member.role}
             onChange={(e) => onRole(member.userId, e.target.value)}
           >
             {(chat.type === 'Channel' ? CHANNEL_ROLE_OPTIONS : ROLE_OPTIONS).map((r) => (
               <option key={r} value={r}>
-                {r}
+                {roleLabel(t, r)}
               </option>
             ))}
           </select>
           <button
             className="member-remove"
             onClick={() => onRemove(member.userId)}
-            aria-label={`Remove ${member.displayName}`}
-            title="Remove"
+            aria-label={t('details.removeMember', { name: member.displayName })}
+            title={t('common.remove')}
           >
             <Icon name="trash" size={15} />
           </button>
         </span>
       ) : (
-        <span className={member.role === 'Owner' ? 'chip owner' : 'chip'}>{member.role}</span>
+        <span className={member.role === 'Owner' ? 'chip owner' : 'chip'}>{roleLabel(t, member.role)}</span>
       )}
     </li>
   );
@@ -95,6 +138,7 @@ export function ChatDetails({
   onLeft: () => void;
 }) {
   const queryClient = useQueryClient();
+  const t = useT();
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [results, setResults] = useState<FoundUser[]>([]);
@@ -169,7 +213,7 @@ export function ChatDetails({
       setSearch('');
       await refresh();
     } catch (e) {
-      fail(e, 'Could not add member.');
+      fail(e, t('details.errAdd'));
     }
   }
 
@@ -183,7 +227,7 @@ export function ChatDetails({
       }
       await refresh();
     } catch (e) {
-      fail(e, 'Could not save.');
+      fail(e, t('details.errSave'));
     }
   }
 
@@ -193,7 +237,7 @@ export function ChatDetails({
       await chatApi.setVisibility(chat.id, isPublic ? { isPublic, username: username.trim().toLowerCase() } : { isPublic });
       await refresh();
     } catch (e) {
-      fail(e, 'Could not change visibility.');
+      fail(e, t('details.errVisibility'));
     }
   }
 
@@ -203,7 +247,7 @@ export function ChatDetails({
       await chatApi.uploadAvatar(chat.id, file);
       await refresh();
     } catch (e) {
-      fail(e, 'Could not upload avatar.');
+      fail(e, t('details.errAvatarUpload'));
     }
   }
 
@@ -213,7 +257,7 @@ export function ChatDetails({
       await chatApi.removeAvatar(chat.id);
       await refresh();
     } catch (e) {
-      fail(e, 'Could not remove avatar.');
+      fail(e, t('details.errAvatarRemove'));
     }
   }
 
@@ -226,7 +270,7 @@ export function ChatDetails({
       await queryClient.invalidateQueries({ queryKey: ['chats'] });
       onLeft();
     } catch (e) {
-      fail(e, 'Could not delete the conversation.');
+      fail(e, t('details.errDelete'));
     } finally {
       setDeleting(false);
       setConfirmDelete(false);
@@ -241,16 +285,16 @@ export function ChatDetails({
       else await apiClient.delete(`/api/v1/users/${peerId}/block`);
       setBlocked(!blocked);
     } catch (e) {
-      fail(e, 'Could not update block.');
+      fail(e, t('details.errBlock'));
     }
   }
 
   const canInvite = admin || (chat.type === 'Group' && chat.membersCanInvite && chat.members.some((m) => m.userId === myUserId));
 
   return (
-    <aside className="details-panel" aria-label="Conversation details">
+    <aside className="details-panel" aria-label={t('details.panelLabel')}>
       <div className="details-close">
-        <button className="icon-btn" onClick={onClose} aria-label="Close details">
+        <button className="icon-btn" onClick={onClose} aria-label={t('details.closeDetails')}>
           <Icon name="close" />
         </button>
       </div>
@@ -265,13 +309,15 @@ export function ChatDetails({
         </span>
         <div className="details-name" dir="auto">{name}</div>
         <div className="details-sub">
-          {chat.type !== 'Dm' ? <span className="chip">{chat.type}</span> : null}
+          {chat.type !== 'Dm' ? (
+            <span className="chip">{chat.type === 'Channel' ? t('details.typeChannel') : t('details.typeGroup')}</span>
+          ) : null}
           {peer ? <span dir="auto">@{peer.username}</span> : null}
           {chat.type !== 'Dm' ? (
-            <span>{chat.memberCount} {chat.type === 'Channel' ? 'subscribers' : 'members'}</span>
+            <span>{chat.memberCount} {chat.type === 'Channel' ? t('details.subscribers') : t('details.members')}</span>
           ) : null}
           {chat.type === 'Channel' && chat.isPublic && chat.username ? <span dir="auto">@{chat.username}</span> : null}
-          {chat.isMuted ? <span className="chip">muted</span> : null}
+          {chat.isMuted ? <span className="chip">{t('details.muted')}</span> : null}
         </div>
         {chat.description ? <p className="details-desc" dir="auto">{chat.description}</p> : null}
       </div>
@@ -285,30 +331,30 @@ export function ChatDetails({
 
       {admin && chat.type !== 'Dm' ? (
         <>
-          <h3 className="details-h">Profile</h3>
+          <h3 className="details-h">{t('details.profile')}</h3>
           <div className="field">
-            <label htmlFor="chat-title">Title</label>
+            <label htmlFor="chat-title">{t('details.titleLabel')}</label>
             <input id="chat-title" value={title} onChange={(e) => setTitle(e.target.value)} maxLength={64} />
           </div>
           <div className="field">
-            <label htmlFor="chat-desc">Description</label>
+            <label htmlFor="chat-desc">{t('details.descLabel')}</label>
             <input id="chat-desc" value={description} onChange={(e) => setDescription(e.target.value)} maxLength={512} />
           </div>
           <div className="row-actions">
             <button className="primary-btn inline" onClick={() => void saveProfile()}>
-              Save profile
+              {t('details.saveProfile')}
             </button>
           </div>
           <div className="field">
-            <span className="field-label" id="chat-avatar-label">Avatar</span>
+            <span className="field-label" id="chat-avatar-label">{t('details.avatar')}</span>
             <div className="row-actions avatar-actions">
               <label className="ghost-btn inline file-btn" htmlFor="chat-avatar">
                 <Icon name="image" size={15} />
-                Change photo
+                {t('details.changePhoto')}
               </label>
               {chat.avatarUrl ? (
                 <button className="ghost-btn inline" onClick={() => void removeAvatar()}>
-                  Remove
+                  {t('common.remove')}
                 </button>
               ) : null}
             </div>
@@ -338,35 +384,35 @@ export function ChatDetails({
               void chatApi
                 .updateProfile(chat.id, { membersCanInvite: e.target.checked })
                 .then(() => refresh())
-                .catch((err: unknown) => fail(err, 'Could not change invite policy.'));
+                .catch((err: unknown) => fail(err, t('details.errInvitePolicy')));
             }}
           />
-          Members can invite others
+          {t('details.membersCanInvite')}
         </label>
       ) : null}
 
       {admin && chat.type === 'Channel' ? (
         <>
-          <h3 className="details-h">Visibility</h3>
-          <p className="hint">{chat.isPublic ? `Public · @${chat.username ?? ''}` : 'Private · join by invite only'}</p>
+          <h3 className="details-h">{t('details.visibility')}</h3>
+          <p className="hint">{chat.isPublic ? t('details.visibilityPublic', { username: chat.username ?? '' }) : t('details.visibilityPrivate')}</p>
           <div className="field">
-            <label htmlFor="chat-username">Username (public channels)</label>
+            <label htmlFor="chat-username">{t('details.usernameLabel')}</label>
             <input
               id="chat-username"
               value={username}
               onChange={(e) => setUsername(e.target.value)}
               maxLength={32}
-              placeholder="e.g. opennews"
+              placeholder={t('details.usernamePh')}
             />
           </div>
           <div className="row-actions">
             {!chat.isPublic ? (
               <button className="ghost-btn inline" onClick={() => void saveVisibility(true)}>
-                Make public
+                {t('details.makePublic')}
               </button>
             ) : (
               <button className="ghost-btn inline" onClick={() => void saveVisibility(false)}>
-                Make private
+                {t('details.makePrivate')}
               </button>
             )}
           </div>
@@ -375,7 +421,7 @@ export function ChatDetails({
 
       {chat.type !== 'Dm' ? (
         <>
-          <h3 className="details-h">Invite link</h3>
+          <h3 className="details-h">{t('details.inviteLink')}</h3>
           {invite ? (
             <div className="invite-box">
               <code>{invite}</code>
@@ -384,11 +430,11 @@ export function ChatDetails({
                 onClick={() => void navigator.clipboard?.writeText(invite).catch(() => undefined)}
               >
                 <Icon name="copy" size={14} />
-                Copy
+                {t('details.copy')}
               </button>
             </div>
           ) : (
-            <p className="hint">No active invite link.</p>
+            <p className="hint">{t('details.noInvite')}</p>
           )}
           {admin ? (
             <div className="row-actions">
@@ -402,10 +448,10 @@ export function ChatDetails({
                       setInvite(code);
                       return refresh();
                     })
-                    .catch((e: unknown) => fail(e, 'Could not create invite.'));
+                    .catch((e: unknown) => fail(e, t('details.errCreateInvite')));
                 }}
               >
-                {invite ? 'Rotate link' : 'Create link'}
+                {invite ? t('details.rotateLink') : t('details.createLink')}
               </button>
               {invite ? (
                 <button
@@ -418,10 +464,10 @@ export function ChatDetails({
                         setInvite(null);
                         return refresh();
                       })
-                      .catch((e: unknown) => fail(e, 'Could not revoke invite.'));
+                      .catch((e: unknown) => fail(e, t('details.errRevokeInvite')));
                   }}
                 >
-                  Revoke
+                  {t('common.revoke')}
                 </button>
               ) : null}
             </div>
@@ -431,11 +477,11 @@ export function ChatDetails({
 
       {pins.length > 0 ? (
         <>
-          <h3 className="details-h">Pinned ({pins.length})</h3>
+          <h3 className="details-h">{t('details.pinned', { count: pins.length })}</h3>
           <ul className="pin-list">
             {pins.map((p) => (
               <li key={p.id} className="pin-row">
-                <span className="pin-text">{p.isDeleted ? 'Message deleted' : p.body.slice(0, 120)}</span>
+                <span className="pin-text">{p.isDeleted ? t('details.messageDeleted') : p.body.slice(0, 120)}</span>
                 {(admin || chat.type === 'Dm') ? (
                   <button
                     className="ghost-btn small inline"
@@ -444,10 +490,10 @@ export function ChatDetails({
                       void chatApi
                         .unpin(chat.id, p.id)
                         .then(() => refresh())
-                        .catch((e: unknown) => fail(e, 'Could not unpin.'));
+                        .catch((e: unknown) => fail(e, t('details.errUnpin')));
                     }}
                   >
-                    Unpin
+                    {t('details.unpin')}
                   </button>
                 ) : null}
               </li>
@@ -456,20 +502,20 @@ export function ChatDetails({
         </>
       ) : null}
 
-      {pinsQuery.isPending ? <p className="hint">Loading pins…</p> : null}
-      {callsQuery.isPending ? <p className="hint">Loading calls…</p> : null}
+      {pinsQuery.isPending ? <p className="hint">{t('details.loadingPins')}</p> : null}
+      {callsQuery.isPending ? <p className="hint">{t('details.loadingCalls')}</p> : null}
       {calls.length > 0 ? (
         <>
-          <h3 className="details-h">Calls ({calls.length})</h3>
+          <h3 className="details-h">{t('details.callsTitle', { count: calls.length })}</h3>
           <ul className="call-history">
             {calls.map((c) => (
               <li key={c.id} className="call-row">
                 <Icon name={c.mediaType === 'Video' ? 'video' : 'phone'} size={16} />
                 <span className="call-main">
-                  <strong>{callHistoryLabel(c, c.initiatorId === myUserId)}</strong>
+                  <strong>{historyLabel(t, c, c.initiatorId === myUserId)}</strong>
                   <span className="hint">
                     {new Date(c.createdAt).toLocaleString()}
-                    {c.status !== 'Ended' ? ` · ${c.status.toLowerCase()}` : null}
+                    {c.status !== 'Ended' ? ` · ${callStatusLabel(t, c.status)}` : null}
                   </span>
                 </span>
               </li>
@@ -478,7 +524,7 @@ export function ChatDetails({
         </>
       ) : null}
 
-      <h3 className="details-h">Members ({chat.memberCount})</h3>
+      <h3 className="details-h">{t('details.membersTitle', { count: chat.memberCount })}</h3>
       <ul className="member-list">
         {chat.members.map((m) => (
           <MemberRow
@@ -492,14 +538,14 @@ export function ChatDetails({
               void chatApi
                 .setRole(chat.id, userId, role)
                 .then(() => refresh())
-                .catch((e: unknown) => fail(e, 'Could not change role.'));
+                .catch((e: unknown) => fail(e, t('details.errRole')));
             }}
             onRemove={(userId) => {
               setError(null);
               void chatApi
                 .removeMember(chat.id, userId)
                 .then(() => refresh())
-                .catch((e: unknown) => fail(e, 'Could not remove member.'));
+                .catch((e: unknown) => fail(e, t('details.errRemoveMember')));
             }}
           />
         ))}
@@ -507,12 +553,12 @@ export function ChatDetails({
 
       {canInvite ? (
         <div className="field">
-          <label htmlFor="add-member">Add member</label>
+          <label htmlFor="add-member">{t('details.addMember')}</label>
           <input
             id="add-member"
             value={search}
             onChange={(e) => void onSearch(e.target.value)}
-            placeholder="Search by name…"
+            placeholder={t('details.searchPh')}
           />
           {results.map((u) => (
             <button key={u.id} className="picker-row" onClick={() => void add(u.id)}>
@@ -523,7 +569,7 @@ export function ChatDetails({
         </div>
       ) : null}
 
-      <h3 className="details-h">Preferences</h3>
+      <h3 className="details-h">{t('details.preferences')}</h3>
       <div className="row-actions even">
         <button
           className="ghost-btn inline"
@@ -532,11 +578,11 @@ export function ChatDetails({
             void chatApi
               .setMuted(chat.id, !chat.isMuted)
               .then(() => refresh())
-              .catch((e: unknown) => fail(e, 'Could not change mute.'));
+              .catch((e: unknown) => fail(e, t('details.errMute')));
           }}
         >
           <Icon name={chat.isMuted ? 'bell' : 'mute'} size={15} />
-          {chat.isMuted ? 'Unmute' : 'Mute'}
+          {chat.isMuted ? t('details.unmute') : t('details.mute')}
         </button>
         <button
           className="ghost-btn inline"
@@ -545,11 +591,11 @@ export function ChatDetails({
             void chatApi
               .setArchived(chat.id, !chat.isArchived)
               .then(() => refresh())
-              .catch((e: unknown) => fail(e, 'Could not change archive.'));
+              .catch((e: unknown) => fail(e, t('details.errArchive')));
           }}
         >
           <Icon name="archive" size={15} />
-          {chat.isArchived ? 'Unarchive' : 'Archive'}
+          {chat.isArchived ? t('details.unarchive') : t('details.archive')}
         </button>
       </div>
 
@@ -561,11 +607,11 @@ export function ChatDetails({
               void chatApi
                 .unsubscribe(chat.id)
                 .then(() => queryClient.invalidateQueries({ queryKey: ['chats'] }).then(() => onLeft()))
-                .catch((e: unknown) => fail(e, 'Could not unsubscribe.'));
+                .catch((e: unknown) => fail(e, t('details.errUnsubscribe')));
             }}
           >
             <Icon name="logout" size={16} />
-            Unsubscribe
+            {t('details.unsubscribe')}
           </button>
         </div>
       ) : null}
@@ -579,11 +625,11 @@ export function ChatDetails({
               void chatApi
                 .leave(chat.id)
                 .then(() => queryClient.invalidateQueries({ queryKey: ['chats'] }).then(() => onLeft()))
-                .catch((e: unknown) => fail(e, 'Could not leave.'));
+                .catch((e: unknown) => fail(e, t('details.errLeave')));
             }}
           >
             <Icon name="logout" size={16} />
-            Leave conversation
+            {t('details.leaveConversation')}
           </button>
         </div>
       ) : null}
@@ -592,7 +638,7 @@ export function ChatDetails({
         <div className="details-actions">
           <button className="danger-text" onClick={() => setConfirmDelete(true)}>
             <Icon name="trash" size={16} />
-            Delete conversation
+            {t('details.deleteConversation')}
           </button>
         </div>
       ) : null}
@@ -601,7 +647,7 @@ export function ChatDetails({
         <div className="details-actions">
           <button onClick={() => void toggleBlock()}>
             <Icon name={blocked ? 'bell' : 'mute'} size={16} />
-            {blocked ? 'Unblock user' : 'Block user'}
+            {blocked ? t('details.unblockUser') : t('details.blockUser')}
           </button>
         </div>
       ) : null}
@@ -618,14 +664,12 @@ export function ChatDetails({
             className="dialog"
             role="dialog"
             aria-modal="true"
-            aria-label="Delete conversation"
+            aria-label={t('details.deleteConversation')}
             onClick={(e) => e.stopPropagation()}
           >
-            <h2>Delete this conversation?</h2>
+            <h2>{t('details.deleteTitle')}</h2>
             <p className="hint">
-              “{name}” will be removed for <strong>all members</strong>. Message history is
-              preserved on the server but the conversation will disappear from everyone's list.
-              This cannot be undone.
+              {t('details.deleteHint1', { name })}<strong>{t('details.deleteHintStrong')}</strong>{t('details.deleteHint2')}
             </p>
             <div className="row-actions">
               <button
@@ -633,14 +677,14 @@ export function ChatDetails({
                 disabled={deleting}
                 onClick={() => setConfirmDelete(false)}
               >
-                Cancel
+                {t('common.cancel')}
               </button>
               <button
                 className="ghost-btn inline danger-text"
                 disabled={deleting}
                 onClick={() => void confirmDeleteChat()}
               >
-                {deleting ? 'Deleting…' : 'Delete for everyone'}
+                {deleting ? t('details.deleting') : t('details.deleteForEveryone')}
               </button>
             </div>
           </div>

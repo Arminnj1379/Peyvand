@@ -3,9 +3,11 @@ import type { FormEvent } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../features/auth/authStore';
 import { ApiError } from '../shared/api/client';
+import { useT } from '../shared/i18n';
 import { Icon } from '../shared/ui/Icon';
 
 export function LoginPage() {
+  const t = useT();
   const navigate = useNavigate();
   const mode = useAuthStore((s) => s.mode);
   const login = useAuthStore((s) => s.login);
@@ -26,7 +28,7 @@ export function LoginPage() {
       await login(loginName.trim(), password);
       await navigate('/');
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Sign-in failed.');
+      setError(err instanceof ApiError ? err.message : t('login.signinFailed'));
     } finally {
       setBusy(false);
     }
@@ -38,22 +40,22 @@ export function LoginPage() {
         <span className="brand-mark" aria-hidden="true">
           <Icon name="send" size={22} />
         </span>
-        <h1>Messenger</h1>
-        <p>Enterprise messaging — sign in to continue.</p>
+        <h1>{t('login.title')}</h1>
+        <p>{t('login.subtitle')}</p>
         <form onSubmit={(e) => void onSubmit(e)}>
           <div className="field">
-            <label htmlFor="login">Username or phone</label>
+            <label htmlFor="login">{t('login.usernameLabel')}</label>
             <input
               id="login"
               value={loginName}
               onChange={(e) => setLoginName(e.target.value)}
               autoComplete="username"
-              placeholder="sara.m or +989121234567"
+              placeholder={t('login.usernamePlaceholder')}
               required
             />
           </div>
           <div className="field">
-            <label htmlFor="password">Password</label>
+            <label htmlFor="password">{t('login.passwordLabel')}</label>
             <input
               id="password"
               type="password"
@@ -65,11 +67,11 @@ export function LoginPage() {
           </div>
           {error ? <div className="form-error">{error}</div> : null}
           <button className="primary-btn" type="submit" disabled={busy}>
-            {busy ? 'Signing in…' : 'Sign in'}
+            {busy ? t('login.signingIn') : t('login.signin')}
           </button>
         </form>
         <p className="phase-note">
-          No account yet? <Link to="/register">Create one</Link>
+          {t('login.noAccount')} <Link to="/register">{t('login.createOne')}</Link>
         </p>
       </div>
     </div>

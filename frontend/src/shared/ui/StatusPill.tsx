@@ -1,8 +1,10 @@
 import { useQuery } from '@tanstack/react-query';
 import { fetchSystemInfo } from '../api/system';
+import { useT } from '../i18n';
 
 /** Backend connectivity indicator (API wiring proof on every screen). */
 export function StatusPill() {
+  const t = useT();
   const { data, isError, isPending } = useQuery({
     queryKey: ['system', 'info'],
     queryFn: ({ signal }) => fetchSystemInfo(signal),
@@ -12,19 +14,19 @@ export function StatusPill() {
   if (isPending) {
     return (
       <span className="status-pill">
-        <span className="status-dot" /> connecting…
+        <span className="status-dot" /> {t('status.connecting')}
       </span>
     );
   }
   if (isError || !data) {
     return (
-      <span className="status-pill" title="Backend unreachable. Start Messenger.Api (see README).">
-        <span className="status-dot degraded" /> backend offline
+      <span className="status-pill" title={t('status.offlineTitle')}>
+        <span className="status-dot degraded" /> {t('status.offline')}
       </span>
     );
   }
   return (
-    <span className="status-pill" title={`Server time ${data.serverTimeUtc}`}>
+    <span className="status-pill" title={t('status.versionTitle', { time: data.serverTimeUtc })}>
       <span className="status-dot online" /> v{data.version}
     </span>
   );

@@ -1,4 +1,5 @@
 import { useRef, useState } from 'react';
+import { useT } from '../i18n';
 import { Icon } from './Icon';
 
 /**
@@ -9,6 +10,7 @@ import { Icon } from './Icon';
  */
 
 function CodeBlock({ code, lang }: { code: string; lang: string }) {
+  const t = useT();
   const [copied, setCopied] = useState(false);
   const timer = useRef<number | null>(null);
 
@@ -42,16 +44,16 @@ function CodeBlock({ code, lang }: { code: string; lang: string }) {
   return (
     <span className="code-block" dir="ltr">
       <span className="code-head">
-        <span className="code-lang">{lang || 'code'}</span>
+        <span className="code-lang">{lang || t('msgbody.code')}</span>
         <button
           type="button"
           className="copy-btn"
           onClick={() => void copy()}
-          title={copied ? 'Copied!' : 'Copy code'}
-          aria-label={copied ? 'Copied!' : 'Copy code'}
+          title={copied ? t('msgbody.copiedExcl') : t('msgbody.copyCode')}
+          aria-label={copied ? t('msgbody.copiedExcl') : t('msgbody.copyCode')}
         >
           <Icon name={copied ? 'check' : 'copy'} size={14} />
-          {copied ? 'Copied' : 'Copy'}
+          {copied ? t('msgbody.copied') : t('msgbody.copy')}
         </button>
       </span>
       <pre className="code-pre">

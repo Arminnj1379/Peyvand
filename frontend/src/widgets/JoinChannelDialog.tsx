@@ -3,6 +3,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { chatApi } from '../features/chats/chatApi';
 import type { PublicChannel } from '../features/chats/chatTypes';
 import { ApiError } from '../shared/api/client';
+import { useT } from '../shared/i18n';
 import { useEscape } from '../shared/ui/useEscape';
 
 /** Join a public channel by username, or any group/channel via invite code. */
@@ -14,6 +15,7 @@ export function JoinChannelDialog({
   onJoined: (chatId: string) => void;
 }) {
   const queryClient = useQueryClient();
+  const t = useT();
   const closeRef = useRef(onClose);
   closeRef.current = onClose;
   useEscape(true, () => closeRef.current());
@@ -27,14 +29,14 @@ export function JoinChannelDialog({
     setError(null);
     setPreview(null);
     if (!username.trim()) {
-      setError('Enter a channel username.');
+      setError(t('joinchannel.errUsername'));
       return;
     }
     setBusy(true);
     try {
       setPreview(await chatApi.publicChannel(username.trim()));
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : 'Channel not found.');
+      setError(e instanceof ApiError ? e.message : t('joinchannel.errNotFound'));
     } finally {
       setBusy(false);
     }
@@ -48,7 +50,7 @@ export function JoinChannelDialog({
       await queryClient.invalidateQueries({ queryKey: ['chats'] });
       onJoined(chat.id);
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : 'Could not subscribe.');
+      setError(e instanceof ApiError ? e.message : t('joinchannel.errSubscribe'));
     } finally {
       setBusy(false);
     }
@@ -57,7 +59,7 @@ export function JoinChannelDialog({
   async function joinWithCode(): Promise<void> {
     setError(null);
     if (!code.trim()) {
-      setError('Paste an invite code.');
+      setError(t('joinchannel.errCode'));
       return;
     }
     setBusy(true);
@@ -66,7 +68,7 @@ export function JoinChannelDialog({
       await queryClient.invalidateQueries({ queryKey: ['chats'] });
       onJoined(chat.id);
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : 'Invalid or revoked invite link.');
+      setError(e instanceof ApiError ? e.message : t('joinchannel.errInvalid'));
     } finally {
       setBusy(false);
     }
@@ -78,57 +80,57 @@ export function JoinChannelDialog({
         className="dialog"
         role="dialog"
         aria-modal="true"
-        aria-label="Join a conversation"
+        aria-label={t('joinchannel.dialogLabel')}
         onClick={(e) => e.stopPropagation()}
       >
-        <h2>Join a channel</h2>
+        <h2>{t('joinchannel.title')}</h2>
         <div className="field">
-          <label htmlFor="join-username">Public channel username</label>
+          <label htmlFor="join-username">{t('joinchannel.usernameLabel')}</label>
           <input
             id="join-username"
             autoFocus
             value={username}
             onChange={(e) => setUsername(e.target.value)}
-            placeholder="e.g. opennews"
+            placeholder={t('joinchannel.usernamePh')}
           />
         </div>
         <div className="row-actions">
           <button className="ghost-btn inline" onClick={() => void lookup()} disabled={busy}>
-            Look up
+            {t('joinchannel.lookup')}
           </button>
         </div>
         {preview ? (
           <div className="picker-list">
             <div className="picker-row">
               <strong>{preview.title}</strong>
-              <span className="hint">@{preview.username} · {preview.memberCount} subscribers</span>
+              <span className="hint">@{preview.username} · {t('joinchannel.subscribers', { count: preview.memberCount })}</span>
               <button className="primary-btn inline" onClick={() => void subscribe(preview.id)} disabled={busy}>
-                Subscribe
+                {t('joinchannel.subscribe')}
               </button>
             </div>
           </div>
         ) : null}
 
-        <h2 style={{ marginTop: 16 }}>Have an invite link?</h2>
+        <h2 style={{ marginTop: 16 }}>{t('joinchannel.inviteTitle')}</h2>
         <div className="field">
-          <label htmlFor="join-code">Invite code</label>
+          <label htmlFor="join-code">{t('joinchannel.codeLabel')}</label>
           <input
             id="join-code"
             value={code}
             onChange={(e) => setCode(e.target.value)}
-            placeholder="Paste the code…"
+            placeholder={t('joinchannel.codePh')}
           />
         </div>
         <div className="row-actions">
           <button className="ghost-btn inline" onClick={() => void joinWithCode()} disabled={busy}>
-            Join
+            {t('joinchannel.join')}
           </button>
         </div>
 
         {error ? <div className="form-error">{error}</div> : null}
         <div className="row-actions">
           <button className="ghost-btn inline" onClick={onClose}>
-            Close
+            {t('common.close')}
           </button>
         </div>
       </div>

@@ -12,6 +12,7 @@ import { useUserQuery } from '../features/auth/useUser';
 import { Icon } from '../shared/ui/Icon';
 import { SearchInput } from '../shared/ui/SearchInput';
 import { NotificationBell } from './NotificationBell';
+import { useT, useLocaleStore } from '../shared/i18n';
 
 export type FolderFilter =
   | 'all'
@@ -22,14 +23,23 @@ export type FolderFilter =
   | 'channel'
   | 'archived';
 
-const TABS: { key: Exclude<FolderFilter, 'archived'>; label: string }[] = [
-  { key: 'all', label: 'All' },
-  { key: 'personal', label: 'Personal' },
-  { key: 'contacts', label: 'Contacts' },
-  { key: 'noncontacts', label: 'Non-Contacts' },
-  { key: 'group', label: 'Groups' },
-  { key: 'channel', label: 'Channels' },
+const TABS: { key: Exclude<FolderFilter, 'archived'> }[] = [
+  { key: 'all' },
+  { key: 'personal' },
+  { key: 'contacts' },
+  { key: 'noncontacts' },
+  { key: 'group' },
+  { key: 'channel' },
 ];
+
+const TAB_KEY_MAP: Record<Exclude<FolderFilter, 'archived'>, string> = {
+  all: 'sidebar.all',
+  personal: 'sidebar.personal',
+  contacts: 'sidebar.contacts',
+  noncontacts: 'sidebar.noncontacts',
+  group: 'sidebar.groups',
+  channel: 'sidebar.channels',
+};
 
 const AVATAR_COLORS = ['#2aabee', '#7b61ff', '#31b545', '#e8a13d', '#df3f40', '#009688'];
 
@@ -64,6 +74,7 @@ function ConversationRow({
   myUserId: string | undefined;
   isOnline: (userId: string) => boolean;
 }) {
+  const t = useT();
   const name = chatDisplayName(c, myUserId);
   const peerId = c.type === 'Dm' ? (c.members.find((m) => m.userId !== myUserId)?.userId ?? null) : null;
   // DM peer photos come from the profile endpoint (shared cache key); group
@@ -85,12 +96,12 @@ function ConversationRow({
           <span className="conversation-name" dir="auto">
             {name}
             {verified ? (
-              <span className="verified-ic" title="Verified">
+              <span className="verified-ic" title={t('chat.verified')}>
                 <Icon name="verified" size={15} />
               </span>
             ) : null}
             {c.isMuted ? (
-              <span className="mute-ic" title="Muted">
+              <span className="mute-ic" title={t('chat.muted')}>
                 <Icon name="mute" size={13} />
               </span>
             ) : null}
@@ -100,7 +111,7 @@ function ConversationRow({
           </span>
         </span>
         <span className="conversation-bottom">
-          <span className="conversation-preview" dir="auto">{c.lastMessagePreview ?? 'No messages yet'}</span>
+          <span className="conversation-preview" dir="auto">{c.lastMessagePreview ?? t('sidebar.noMessagesYet')}</span>
           <span className="conversation-meta">
             {c.unreadCount > 0 ? (
               <span className={`unread-badge${c.isMuted ? ' muted' : ''}`}>{c.unreadCount}</span>
@@ -144,6 +155,9 @@ export function ChatList({
   const [menuOpen, setMenuOpen] = useState(false);
   const [promoVisible, setPromoVisible] = useState(promoVisibleInitial);
   const [itemMenu, setItemMenu] = useState<{ chat: Chat; x: number; y: number } | null>(null);
+  const t = useT();
+  const locale = useLocaleStore((s) => s.locale);
+  const setLocale = useLocaleStore((s) => s.setLocale);
   const navigate = useNavigate();
   const user = useAuthStore((s) => s.user);
   const logout = useAuthStore((s) => s.logout);
@@ -211,26 +225,26 @@ export function ChatList({
 
   const emptyHint =
     filter === 'archived'
-      ? 'Nothing archived.'
+      ? t('sidebar.emptyArchived')
       : filter === 'personal'
-        ? 'No personal chats yet.'
+        ? t('sidebar.emptyPersonal')
         : filter === 'contacts'
-          ? 'No contacts yet.'
+          ? t('sidebar.emptyContacts')
           : filter === 'noncontacts'
-            ? 'No chats from non-contacts.'
+            ? t('sidebar.emptyNoncontacts')
             : filter === 'group'
-              ? 'No groups yet.'
+              ? t('sidebar.emptyGroup')
               : filter === 'channel'
-                ? 'No channels yet.'
-                : 'No conversations yet.';
+                ? t('sidebar.emptyChannel')
+                : t('sidebar.emptyAll');
 
   return (
-    <aside className="sidebar" aria-label="Conversations">
+    <aside className="sidebar" aria-label={t('sidebar.conversations')}>
       <div className="sidebar-header">
         <button
           className="icon-btn"
-          aria-label="Menu"
-          title="Menu"
+          aria-label={t('sidebar.menu')}
+          title={t('sidebar.menu')}
           onClick={() => setMenuOpen((open) => !open)}
           aria-expanded={menuOpen}
         >
@@ -239,8 +253,8 @@ export function ChatList({
         <SearchInput value={query} onChange={onQueryChange} />
         <button
           className="icon-btn"
-          aria-label="Search messages, chats, and people"
-          title="Search (Ctrl+K)"
+          aria-label={t('search.openLabel')}
+          title={t('search.openTitle')}
           onClick={onOpenSearch}
         >
           <Icon name="search" />
@@ -254,7 +268,7 @@ export function ChatList({
           onClick={() => setMenuOpen((open) => !open)}
           aria-haspopup="menu"
           aria-expanded={menuOpen}
-          aria-label="Account menu"
+          aria-label={t('sidebar.accountMenu')}
           title={label}
         >
           <UserAvatar avatarUrl={selfAvatarUrl} name={label} color="#8774e1" size={38} />
@@ -268,7 +282,7 @@ export function ChatList({
               }}
             >
               <Icon name="settings" size={16} />
-              My profile
+              {t('sidebar.myProfile')}
             </button>
             <button
               onClick={() => {
@@ -277,7 +291,7 @@ export function ChatList({
               }}
             >
               <Icon name="archive" size={16} />
-              Archived chats
+              {t('sidebar.archivedChats')}
               {counts.archived > 0 ? (
                 <span className="folder-count dim">{counts.archived}</span>
               ) : null}
@@ -290,7 +304,7 @@ export function ChatList({
                 }}
               >
                 <Icon name="users" size={16} />
-                User administration
+                {t('sidebar.userAdmin')}
               </button>
             ) : null}
             <button
@@ -300,7 +314,28 @@ export function ChatList({
               }}
             >
               <Icon name="info" size={16} />
-              Support
+              {t('sidebar.support')}
+            </button>
+            <div className="profile-menu-label">{t('sidebar.language')}</div>
+            <button
+              onClick={() => {
+                setLocale('en');
+                setMenuOpen(false);
+              }}
+              aria-pressed={locale === 'en'}
+            >
+              {t('sidebar.english')}
+              {locale === 'en' ? ' ✓' : null}
+            </button>
+            <button
+              onClick={() => {
+                setLocale('fa');
+                setMenuOpen(false);
+              }}
+              aria-pressed={locale === 'fa'}
+            >
+              {t('sidebar.persian')}
+              {locale === 'fa' ? ' ✓' : null}
             </button>
             <div className="menu-sep" aria-hidden="true" />
             <button
@@ -310,13 +345,13 @@ export function ChatList({
               }}
             >
               <Icon name="logout" size={16} />
-              Log out
+              {t('common.signOut')}
             </button>
           </div>
         ) : null}
       </div>
 
-      <nav className="folder-tabs" aria-label="Folders">
+      <nav className="folder-tabs" aria-label={t('sidebar.folders')}>
         {TABS.map((tab) => (
           <button
             key={tab.key}
@@ -324,7 +359,7 @@ export function ChatList({
             onClick={() => onFilterChange(tab.key)}
             aria-pressed={filter === tab.key}
           >
-            {tab.label}
+            {t(TAB_KEY_MAP[tab.key])}
             {tab.key === 'all' && totalUnread > 0 ? (
               <span className="folder-count accent">{totalUnread}</span>
             ) : null}
@@ -339,18 +374,18 @@ export function ChatList({
       </nav>
 
       {promoVisible ? (
-        <div className="promo-banner" role="note" aria-label="Add your birthday">
+        <div className="promo-banner" role="note" aria-label={t('sidebar.promoLabel')}>
           <span className="promo-ic" aria-hidden="true">
             <Icon name="gift" size={18} />
           </span>
           <span className="promo-main">
-            <span className="promo-title">Add your birthday!</span>
-            <span className="promo-sub">Let friends celebrate with you 🎂</span>
+            <span className="promo-title">{t('sidebar.promoTitle')}</span>
+            <span className="promo-sub">{t('sidebar.promoSub')}</span>
           </span>
           <button
             className="icon-btn"
-            aria-label="Dismiss"
-            title="Dismiss"
+            aria-label={t('common.close')}
+            title={t('common.close')}
             onClick={dismissPromo}
             style={{ width: 30, height: 30 }}
           >
@@ -363,17 +398,17 @@ export function ChatList({
         <div className="archived-bar">
           <Icon name="archive" size={15} />
           <span>
-            Archived · {counts.archived}
+            {t('sidebar.archivedCount', { count: counts.archived })}
           </span>
           <button className="ghost-btn inline small" onClick={() => onFilterChange('all')}>
-            Show all
+            {t('sidebar.showAll')}
           </button>
         </div>
       ) : null}
 
-      <div className="conversation-list" role="listbox" aria-label="Conversation list">
+      <div className="conversation-list" role="listbox" aria-label={t('sidebar.conversationList')}>
         {isLoading ? (
-          <p className="loading-line">Loading…</p>
+          <p className="loading-line">{t('common.loading')}</p>
         ) : null}
         {!isLoading && visible.length === 0 ? (
           <div className="empty-chats">
@@ -383,10 +418,10 @@ export function ChatList({
             <p>{emptyHint}</p>
             <div className="row-actions">
               <button className="ghost-btn inline" onClick={onNewChat}>
-                Start a conversation
+                {t('sidebar.startConversation')}
               </button>
               <button className="ghost-btn inline" onClick={onJoinChannel}>
-                Join a channel
+                {t('sidebar.joinChannel')}
               </button>
             </div>
           </div>
@@ -405,8 +440,8 @@ export function ChatList({
       </div>
       <button
         className="new-chat-fab"
-        aria-label="New conversation"
-        title="New conversation"
+        aria-label={t('sidebar.newConversation')}
+        title={t('sidebar.newConversation')}
         onClick={onNewChat}
       >
         <Icon name="edit" size={20} />
@@ -428,7 +463,7 @@ export function ChatList({
               }}
             >
               <Icon name="archive" size={16} />
-              {itemMenu.chat.isArchived ? 'Unarchive' : 'Archive'}
+              {itemMenu.chat.isArchived ? t('sidebar.unarchive') : t('sidebar.archive')}
             </button>
             <button
               onClick={() => {
@@ -438,7 +473,7 @@ export function ChatList({
               }}
             >
               <Icon name={itemMenu.chat.isMuted ? 'bell' : 'mute'} size={16} />
-              {itemMenu.chat.isMuted ? 'Unmute' : 'Mute'}
+              {itemMenu.chat.isMuted ? t('chat.unmute') : t('chat.mute')}
             </button>
             {itemMenu.chat.seqCounter > 0 ? (
               <button
@@ -449,7 +484,7 @@ export function ChatList({
                 }}
               >
                 <Icon name="checks" size={16} />
-                Mark as unread
+                {t('sidebar.markUnread')}
               </button>
             ) : null}
           </div>

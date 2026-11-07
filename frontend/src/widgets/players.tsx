@@ -1,4 +1,5 @@
 import { useMemo, useRef, useState } from 'react';
+import { useT } from '../shared/i18n';
 import { Icon } from '../shared/ui/Icon';
 
 /** Telegram-web-style inline players (music, voice, video). */
@@ -57,6 +58,7 @@ function seekFromPointer(
 /* ── Music (audio file): round play button + title + seek bar ─────────── */
 
 export function MusicPlayer({ url, fileName }: { url: string; fileName: string }) {
+  const t = useT();
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const barRef = useRef<HTMLDivElement | null>(null);
   const [playing, setPlaying] = useState(false);
@@ -82,7 +84,7 @@ export function MusicPlayer({ url, fileName }: { url: string; fileName: string }
         type="button"
         className="tg-playbtn"
         onClick={toggle}
-        aria-label={playing ? `Pause ${fileName}` : `Play ${fileName}`}
+        aria-label={playing ? t('player.pauseTrack', { name: fileName }) : t('player.playTrack', { name: fileName })}
       >
         <Icon name={playing ? 'pause' : 'play'} size={22} />
       </button>
@@ -94,7 +96,7 @@ export function MusicPlayer({ url, fileName }: { url: string; fileName: string }
           ref={barRef}
           className="music-bar"
           role="slider"
-          aria-label="Seek"
+          aria-label={t('player.seek')}
           aria-valuemin={0}
           aria-valuemax={Math.round(duration)}
           aria-valuenow={Math.round(time)}
@@ -139,6 +141,7 @@ export function MusicPlayer({ url, fileName }: { url: string; fileName: string }
 /* ── Voice: round play button + waveform + duration (Telegram pill) ────── */
 
 export function VoicePlayer({ url, fileId }: { url: string; fileId: string }) {
+  const t = useT();
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const barsRef = useRef<HTMLSpanElement | null>(null);
   const [playing, setPlaying] = useState(false);
@@ -168,7 +171,7 @@ export function VoicePlayer({ url, fileId }: { url: string; fileId: string }) {
         type="button"
         className="tg-playbtn sm"
         onClick={toggle}
-        aria-label={playing ? 'Pause voice message' : 'Play voice message'}
+        aria-label={playing ? t('player.pauseVoice') : t('player.playVoice')}
       >
         <Icon name={playing ? 'pause' : 'play'} size={19} />
       </button>
@@ -177,7 +180,7 @@ export function VoicePlayer({ url, fileId }: { url: string; fileId: string }) {
           ref={barsRef}
           className="voice-bars"
           role="slider"
-          aria-label="Seek voice message"
+          aria-label={t('player.seekVoice')}
           aria-valuemin={0}
           aria-valuemax={Math.round(duration)}
           aria-valuenow={Math.round(time)}
@@ -203,7 +206,7 @@ export function VoicePlayer({ url, fileId }: { url: string; fileId: string }) {
         </span>
         <span className="voice-time">
           {formatMediaTime(time > 0 || playing ? time : duration)}
-          {!listened ? <span className="voice-dot" aria-label="Unplayed" /> : null}
+          {!listened ? <span className="voice-dot" aria-label={t('player.unplayed')} /> : null}
         </span>
       </span>
       <audio
@@ -211,7 +214,7 @@ export function VoicePlayer({ url, fileId }: { url: string; fileId: string }) {
         data-tg-media
         src={url}
         preload="metadata"
-        aria-label="Voice message"
+        aria-label={t('player.voiceMessage')}
         onPlay={() => {
           setPlaying(true);
           setListened(true);
@@ -231,6 +234,7 @@ export function VoicePlayer({ url, fileId }: { url: string; fileId: string }) {
 /* ── Video: rounded frame, center play, duration badge, mini controls ──── */
 
 export function VideoPlayer({ url, fileName }: { url: string; fileName: string }) {
+  const t = useT();
   const wrapRef = useRef<HTMLSpanElement | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const progressRef = useRef<HTMLSpanElement | null>(null);
@@ -295,7 +299,7 @@ export function VideoPlayer({ url, fileName }: { url: string; fileName: string }
         }}
       />
       {!playing ? (
-        <button type="button" className="tg-video-play" onClick={toggle} aria-label={`Play ${fileName}`}>
+        <button type="button" className="tg-video-play" onClick={toggle} aria-label={t('player.playTrack', { name: fileName })}>
           <Icon name="play" size={28} />
         </button>
       ) : null}
@@ -310,8 +314,8 @@ export function VideoPlayer({ url, fileName }: { url: string; fileName: string }
             type="button"
             className="tg-video-icon"
             onClick={toggleMuted}
-            aria-label={muted ? 'Unmute' : 'Mute'}
-            title={muted ? 'Unmute' : 'Mute'}
+            aria-label={muted ? t('player.unmute') : t('player.mute')}
+            title={muted ? t('player.unmute') : t('player.mute')}
           >
             <Icon name={muted ? 'volumeOff' : 'volume'} size={16} />
           </button>
@@ -319,8 +323,8 @@ export function VideoPlayer({ url, fileName }: { url: string; fileName: string }
             type="button"
             className="tg-video-icon"
             onClick={toggleFullscreen}
-            aria-label="Fullscreen"
-            title="Fullscreen"
+            aria-label={t('player.fullscreen')}
+            title={t('player.fullscreen')}
           >
             <Icon name="expand" size={16} />
           </button>
@@ -330,7 +334,7 @@ export function VideoPlayer({ url, fileName }: { url: string; fileName: string }
         ref={progressRef}
         className="tg-video-progress"
         role="slider"
-        aria-label="Seek video"
+        aria-label={t('player.seekVideo')}
         aria-valuemin={0}
         aria-valuemax={Math.round(duration)}
         aria-valuenow={Math.round(time)}

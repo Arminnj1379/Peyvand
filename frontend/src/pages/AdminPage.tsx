@@ -4,10 +4,12 @@ import { Link } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { adminApi } from '../features/auth/authApi';
 import { ApiError } from '../shared/api/client';
+import { useT } from '../shared/i18n';
 
 const ALL_ROLES = ['Employee', 'Customer', 'SupportAgent', 'OrganizationAdministrator', 'SystemAdministrator'];
 
 export function AdminPage() {
+  const t = useT();
   const queryClient = useQueryClient();
   const [username, setUsername] = useState('');
   const [displayName, setDisplayName] = useState('');
@@ -31,7 +33,7 @@ export function AdminPage() {
       setFormMsg(null);
       void invalidate();
     },
-    onError: (e) => setFormMsg(e instanceof ApiError ? e.message : 'Create failed.'),
+    onError: (e) => setFormMsg(e instanceof ApiError ? e.message : t('admin.createFailed')),
   });
 
   function toggleRole(role: string): void {
@@ -47,26 +49,26 @@ export function AdminPage() {
   return (
     <div className="center-page">
       <div className="card wide">
-        <Link to="/">← Back to chats</Link>
-        <h1>User administration</h1>
-        <p>Create employee accounts and manage activation.</p>
+        <Link to="/">{t('admin.back')}</Link>
+        <h1>{t('admin.title')}</h1>
+        <p>{t('admin.subtitle')}</p>
 
-        <h2>New employee</h2>
+        <h2>{t('admin.newEmployee')}</h2>
         <form onSubmit={(e) => void onSubmit(e)}>
           <div className="field">
-            <label htmlFor="ad-username">Username</label>
+            <label htmlFor="ad-username">{t('admin.username')}</label>
             <input id="ad-username" value={username} onChange={(e) => setUsername(e.target.value)} required minLength={3} maxLength={32} />
           </div>
           <div className="field">
-            <label htmlFor="ad-name">Display name</label>
+            <label htmlFor="ad-name">{t('admin.displayName')}</label>
             <input id="ad-name" value={displayName} onChange={(e) => setDisplayName(e.target.value)} required maxLength={64} />
           </div>
           <div className="field">
-            <label htmlFor="ad-password">Password</label>
+            <label htmlFor="ad-password">{t('admin.password')}</label>
             <input id="ad-password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} required minLength={8} autoComplete="new-password" />
           </div>
           <div className="field">
-            <span className="hint">Roles (Employee is always included)</span>
+            <span className="hint">{t('admin.rolesHint')}</span>
             <div className="chip-row">
               {ALL_ROLES.filter((r) => r !== 'Employee').map((r) => (
                 <label key={r} className="check">
@@ -78,22 +80,22 @@ export function AdminPage() {
           </div>
           {formMsg ? <div className="form-error">{formMsg}</div> : null}
           <button className="primary-btn" type="submit" disabled={create.isPending}>
-            {create.isPending ? 'Creating…' : 'Create employee'}
+            {create.isPending ? t('admin.creating') : t('admin.create')}
           </button>
         </form>
 
-        <h2>Users</h2>
-        {usersQuery.isPending ? <p className="hint">Loading…</p> : null}
-        {usersQuery.isError ? <div className="form-error">Could not load users.</div> : null}
+        <h2>{t('admin.users')}</h2>
+        {usersQuery.isPending ? <p className="hint">{t('common.loading')}</p> : null}
+        {usersQuery.isError ? <div className="form-error">{t('admin.loadFailed')}</div> : null}
         <div className="table-scroll">
-          <table className="table" aria-label="Users">
+          <table className="table" aria-label={t('admin.users')}>
           <thead>
             <tr>
-              <th>Username</th>
-              <th>Name</th>
-              <th>Type</th>
-              <th>Roles</th>
-              <th>Status</th>
+              <th>{t('admin.username')}</th>
+              <th>{t('admin.nameCol')}</th>
+              <th>{t('admin.typeCol')}</th>
+              <th>{t('admin.rolesCol')}</th>
+              <th>{t('admin.statusCol')}</th>
               <th />
             </tr>
           </thead>
@@ -112,13 +114,13 @@ export function AdminPage() {
                     ))}
                   </div>
                 </td>
-                <td>{u.isActive ? 'active' : 'deactivated'}</td>
+                <td>{u.isActive ? t('admin.active') : t('admin.deactivated')}</td>
                 <td>
                   <button
                     className="ghost-btn inline small"
                     onClick={() => adminApi.setActive(u.id, !u.isActive).then(() => invalidate())}
                   >
-                    {u.isActive ? 'Deactivate' : 'Activate'}
+                    {u.isActive ? t('admin.deactivate') : t('admin.activate')}
                   </button>
                 </td>
               </tr>

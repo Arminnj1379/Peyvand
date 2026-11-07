@@ -7,16 +7,23 @@ import { PeerTile, useCallRoom } from '../features/calls/useCallRoom';
 import type { Chat } from '../features/chats/chatTypes';
 import { chatDisplayName } from '../features/chats/chatTypes';
 import { ApiError } from '../shared/api/client';
+import { useT } from '../shared/i18n';
+import type { TFunction } from '../shared/i18n';
 import { Icon } from '../shared/ui/Icon';
 
 /** Resolves display names from chat members (server sends ids only). */
-function namesFor(call: CallInfo, chats: Chat[], myUserId: string | undefined): Map<string, string> {
+function namesFor(
+  call: CallInfo,
+  chats: Chat[],
+  myUserId: string | undefined,
+  t: TFunction,
+): Map<string, string> {
   const map = new Map<string, string>();
   const chat = chats.find((c) => c.id === call.chatId);
   for (const m of chat?.members ?? []) {
-    map.set(m.userId, m.displayName || m.username || 'Guest');
+    map.set(m.userId, m.displayName || m.username || t('call.guest'));
   }
-  if (myUserId && !map.has(myUserId)) map.set(myUserId, 'You');
+  if (myUserId && !map.has(myUserId)) map.set(myUserId, t('call.you'));
   return map;
 }
 
@@ -26,13 +33,14 @@ function IncomingCall({ chats, myUserId }: { chats: Chat[]; myUserId: string | u
   const setIncoming = useCallStore((s) => s.setIncoming);
   const setError = useCallStore((s) => s.setError);
   const [busy, setBusy] = useState(false);
+  const t = useT();
 
   if (!incoming || incoming.status === 'Ended') return null;
 
-  const names = namesFor(incoming, chats, myUserId);
-  const caller = names.get(incoming.initiatorId) ?? 'Someone';
+  const names = namesFor(incoming, chats, myUserId, t);
+  const caller = names.get(incoming.initiatorId) ?? t('call.someone');
   const chat = chats.find((c) => c.id === incoming.chatId);
-  const chatName = chat ? chatDisplayName(chat, myUserId) : 'conversation';
+  const chatName = chat ? chatDisplayName(chat, myUserId) : t('call.unknownChat');
 
   async function accept(): Promise<void> {
     setBusy(true);
@@ -41,7 +49,7 @@ function IncomingCall({ chats, myUserId }: { chats: Chat[]; myUserId: string | u
       const join = await callApi.join(incoming!.id);
       setActive(join.call, join);
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : 'Could not join the call.');
+      setError(e instanceof ApiError ? e.message : t('call.errJoin'));
       setIncoming(null);
     } finally {
       setBusy(false);
@@ -62,17 +70,17 @@ function IncomingCall({ chats, myUserId }: { chats: Chat[]; myUserId: string | u
 
   return (
     <div className="call-incoming-backdrop" role="presentation">
-      <div className="call-incoming" role="dialog" aria-modal="true" aria-label="Incoming call">
+      <div className="call-incoming" role="dialog" aria-modal="true" aria-label={t('call.incomingLabel')}>
         <div className="call-incoming-avatar" aria-hidden="true">{caller.slice(0, 1).toUpperCase()}</div>
         <strong>{caller}</strong>
         <span className="hint">
-          Incoming {incoming.mediaType === 'Video' ? 'video' : 'voice'} call · {chatName}
+          {t(incoming.mediaType === 'Video' ? 'call.incomingVideo' : 'call.incomingVoice', { chat: chatName })}
         </span>
         <div className="call-incoming-actions">
-          <button className="call-btn decline" onClick={() => void decline()} disabled={busy} aria-label="Decline call">
+          <button className="call-btn decline" onClick={() => void decline()} disabled={busy} aria-label={t('call.decline')}>
             <Icon name="phoneDown" size={22} />
           </button>
-          <button className="call-btn accept" onClick={() => void accept()} disabled={busy} aria-label="Accept call">
+          <button className="call-btn accept" onClick={() => void accept()} disabled={busy} aria-label={t('call.accept')}>
             <Icon name="phone" size={22} />
           </button>
         </div>
@@ -89,6 +97,7 @@ function ActiveCall({ chats, myUserId }: { chats: Chat[]; myUserId: string | und
   const setError = useCallStore((s) => s.setError);
   const [elapsed, setElapsed] = useState(0);
   const [showPeople, setShowPeople] = useState(false);
+  const t = useT();
   const isVideo = active?.mediaType === 'Video';
   const { peers, connected, muted, cameraOff, error, toggleMute, toggleCamera, disconnect } =
     useCallRoom(join, isVideo);
@@ -107,12 +116,12 @@ function ActiveCall({ chats, myUserId }: { chats: Chat[]; myUserId: string | und
 
   if (!active || active.status === 'Ended' || !join) return null;
 
-  const names = namesFor(active, chats, myUserId);
+  const names = namesFor(active, chats, myUserId, t);
   const labeled = peers.map((p) => ({
     ...p,
-    name: p.isLocal ? 'You' : (names.get(p.identity) ?? p.name),
+    name: p.isLocal ? t('call.you') : (names.get(p.identity) ?? p.name),
   }));
-  const status = active.status === 'Ringing' ? 'Ringing…' : formatCallDuration(elapsed);
+  const status = active.status === 'Ringing' ? t('call.ringing') : formatCallDuration(elapsed);
 
   async function hangUp(endForAll: boolean): Promise<void> {
     disconnect();
@@ -127,16 +136,16 @@ function ActiveCall({ chats, myUserId }: { chats: Chat[]; myUserId: string | und
   }
 
   return (
-    <div className="call-overlay" role="dialog" aria-modal="true" aria-label={isVideo ? 'Video call' : 'Voice call'}>
+    <div className="call-overlay" role="dialog" aria-modal="true" aria-label={isVideo ? t('call.activeVideo') : t('call.activeVoice')}>
       <header className="call-head">
         <div>
-          <strong>{isVideo ? 'Video call' : 'Voice call'}</strong>
+          <strong>{isVideo ? t('call.activeVideo') : t('call.activeVoice')}</strong>
           <span className="hint">
-            {connected ? status : 'Connecting media…'}
+            {connected ? status : t('call.connecting')}
             {error ? ` · ${error}` : null}
           </span>
         </div>
-        <button className="icon-btn" aria-label="Participants" aria-pressed={showPeople} onClick={() => setShowPeople((v) => !v)}>
+        <button className="icon-btn" aria-label={t('call.participants')} aria-pressed={showPeople} onClick={() => setShowPeople((v) => !v)}>
           <Icon name="users" />
         </button>
       </header>
@@ -155,7 +164,7 @@ function ActiveCall({ chats, myUserId }: { chats: Chat[]; myUserId: string | und
               </div>
               <div className="peer-label">
                 <span>{p.name}</span>
-                {p.isMuted ? <span className="peer-flag">muted</span> : null}
+                {p.isMuted ? <span className="peer-flag">{t('call.muted')}</span> : null}
               </div>
             </div>
           ),
@@ -163,12 +172,12 @@ function ActiveCall({ chats, myUserId }: { chats: Chat[]; myUserId: string | und
       </div>
 
       {showPeople ? (
-        <ul className="call-roster" aria-label="Call participants">
+        <ul className="call-roster" aria-label={t('call.rosterLabel')}>
           {active.participants.map((p) => (
             <li key={p.userId}>
-              <span>{p.userId === myUserId ? 'You' : (names.get(p.userId) ?? 'Guest')}</span>
+              <span>{p.userId === myUserId ? t('call.you') : (names.get(p.userId) ?? t('call.guest'))}</span>
               <span className="hint">
-                {p.isJoined ? 'in call' : p.status === 'Rejected' ? 'declined' : p.status === 'Accepted' ? 'accepted' : 'ringing'}
+                {p.isJoined ? t('call.inCall') : p.status === 'Rejected' ? t('call.rosterDeclined') : p.status === 'Accepted' ? t('call.rosterAccepted') : t('call.rosterRinging')}
               </span>
             </li>
           ))}
@@ -181,9 +190,9 @@ function ActiveCall({ chats, myUserId }: { chats: Chat[]; myUserId: string | und
         <button
           className={`call-btn round${muted ? ' off' : ''}`}
           onClick={toggleMute}
-          aria-label={muted ? 'Unmute microphone' : 'Mute microphone'}
+          aria-label={muted ? t('call.unmuteMic') : t('call.muteMic')}
           aria-pressed={muted}
-          title={muted ? 'Unmute' : 'Mute'}
+          title={muted ? t('call.unmute') : t('call.mute')}
         >
           <Icon name={muted ? 'micOff' : 'mic'} size={20} />
         </button>
@@ -191,9 +200,9 @@ function ActiveCall({ chats, myUserId }: { chats: Chat[]; myUserId: string | und
           <button
             className={`call-btn round${cameraOff ? ' off' : ''}`}
             onClick={toggleCamera}
-            aria-label={cameraOff ? 'Turn camera on' : 'Turn camera off'}
+            aria-label={cameraOff ? t('call.cameraOn') : t('call.cameraOff')}
             aria-pressed={cameraOff}
-            title="Camera"
+            title={t('call.camera')}
           >
             <Icon name="video" size={20} />
           </button>
@@ -201,8 +210,8 @@ function ActiveCall({ chats, myUserId }: { chats: Chat[]; myUserId: string | und
         <button
           className="call-btn round"
           onClick={() => void hangUp(false)}
-          aria-label="Leave call"
-          title="Leave (keeps the call up for others)"
+          aria-label={t('call.leave')}
+          title={t('call.leaveHint')}
         >
           <Icon name="back" size={20} />
         </button>
@@ -212,8 +221,8 @@ function ActiveCall({ chats, myUserId }: { chats: Chat[]; myUserId: string | und
             setError(null);
             void hangUp(true);
           }}
-          aria-label="End call for everyone"
-          title="End for everyone"
+          aria-label={t('call.endForAll')}
+          title={t('call.endForAllHint')}
         >
           <Icon name="phoneDown" size={22} />
         </button>

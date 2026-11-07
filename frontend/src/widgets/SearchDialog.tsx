@@ -7,13 +7,14 @@ import type { Chat } from '../features/chats/chatTypes';
 import type { Message } from '../features/messages/messageTypes';
 import { ApiError } from '../shared/api/client';
 import { useEscape } from '../shared/ui/useEscape';
+import { useT } from '../shared/i18n';
 
 type Tab = 'messages' | 'chats' | 'people';
 
-const TABS: { key: Tab; label: string }[] = [
-  { key: 'messages', label: 'Messages' },
-  { key: 'chats', label: 'Chats' },
-  { key: 'people', label: 'People' },
+const TABS: { key: Tab }[] = [
+  { key: 'messages' },
+  { key: 'chats' },
+  { key: 'people' },
 ];
 
 /**
@@ -38,6 +39,7 @@ export function SearchDialog({
   const [people, setPeople] = useState<DirectoryUser[]>([]);
   const [searched, setSearched] = useState(false);
   const closeRef = useRef(onClose);
+  const t = useT();
   closeRef.current = onClose;
   useEscape(true, () => closeRef.current());
 
@@ -54,7 +56,7 @@ export function SearchDialog({
     setBusy(true);
     setError(null);
     const controller = new AbortController();
-    const t = window.setTimeout(() => {
+    const timer = window.setTimeout(() => {
       const run = async () => {
         try {
           if (tab === 'messages') setMessages(await searchApi.messages(q, 20, controller.signal));
@@ -63,7 +65,7 @@ export function SearchDialog({
           setSearched(true);
         } catch (e) {
           if (e instanceof ApiError && e.status === 0) return; // aborted
-          setError(e instanceof ApiError ? e.message : 'Search failed.');
+          setError(e instanceof ApiError ? e.message : t('search.failed'));
         } finally {
           setBusy(false);
         }
@@ -71,7 +73,7 @@ export function SearchDialog({
       void run();
     }, 300);
     return () => {
-      window.clearTimeout(t);
+      window.clearTimeout(timer);
       controller.abort();
     };
   }, [query, tab]);
@@ -81,7 +83,7 @@ export function SearchDialog({
       const chat = await chatApi.createDm(userId);
       onOpenChat(chat.id);
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : 'Could not open conversation.');
+      setError(e instanceof ApiError ? e.message : t('search.openFailed'));
     }
   }
 
@@ -97,7 +99,7 @@ export function SearchDialog({
         className="dialog search-dialog"
         role="dialog"
         aria-modal="true"
-        aria-label="Search messages, chats, and people"
+        aria-label={t('search.openLabel')}
         onClick={(e) => e.stopPropagation()}
       >
         <input
@@ -107,39 +109,39 @@ export function SearchDialog({
           onKeyDown={(e) => {
             if (e.key === 'Enter') openTop();
           }}
-          placeholder="Search messages, chats, people… (min 2 chars)"
-          aria-label="Search query"
+          placeholder={t('search.placeholder')}
+          aria-label={t('search.queryLabel')}
           maxLength={200}
         />
-        <nav className="folder-tabs" aria-label="Search scope">
-          {TABS.map((t) => (
+        <nav className="folder-tabs" aria-label={t('search.scopeLabel')}>
+          {TABS.map((tb) => (
             <button
-              key={t.key}
-              className={`folder-tab${tab === t.key ? ' active' : ''}`}
-              onClick={() => setTab(t.key)}
-              aria-pressed={tab === t.key}
+              key={tb.key}
+              className={`folder-tab${tab === tb.key ? ' active' : ''}`}
+              onClick={() => setTab(tb.key)}
+              aria-pressed={tab === tb.key}
             >
-              {t.label}
+              {t(`search.${tb.key}`)}
             </button>
           ))}
         </nav>
-        <div className="search-results" role="listbox" aria-label="Search results">
-          {busy ? <p className="hint">Searching…</p> : null}
+        <div className="search-results" role="listbox" aria-label={t('search.resultsLabel')}>
+          {busy ? <p className="hint">{t('search.searching')}</p> : null}
           {error ? <div className="form-error">{error}</div> : null}
           {!busy && !error && searched && tab === 'messages' && messages.length === 0 ? (
-            <p className="hint">No messages found.</p>
+            <p className="hint">{t('search.noMessages')}</p>
           ) : null}
           {!busy && !error && searched && tab === 'chats' && chats.length === 0 ? (
-            <p className="hint">No conversations found.</p>
+            <p className="hint">{t('search.noChats')}</p>
           ) : null}
           {!busy && !error && searched && tab === 'people' && people.length === 0 ? (
-            <p className="hint">Nobody found.</p>
+            <p className="hint">{t('search.noPeople')}</p>
           ) : null}
           {tab === 'messages'
             ? messages.map((m) => (
                 <button key={m.id} className="picker-row" role="option" aria-selected="false" onClick={() => onOpenChat(m.chatId)}>
                   <strong>{m.senderName ?? m.senderUsername ?? 'Unknown'}</strong>
-                  <span className="hint">{m.isDeleted ? 'Message deleted' : m.body.slice(0, 120)}</span>
+                  <span className="hint">{m.isDeleted ? t('chat.messageDeleted') : m.body.slice(0, 120)}</span>
                 </button>
               ))
             : null}

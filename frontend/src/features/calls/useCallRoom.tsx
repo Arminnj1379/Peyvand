@@ -7,6 +7,7 @@ import {
   type RemoteParticipant,
 } from 'livekit-client';
 import type { CallJoin } from './callTypes';
+import { useT } from '../../shared/i18n';
 
 export interface RoomPeer {
   identity: string;
@@ -43,6 +44,7 @@ export function useCallRoom(
   const [muted, setMuted] = useState(false);
   const [cameraOff, setCameraOff] = useState(!video);
   const [error, setError] = useState<string | null>(null);
+  const t = useT();
   const joinRef = useRef(join);
   joinRef.current = join;
   const videoRef = useRef(video);
@@ -54,7 +56,7 @@ export function useCallRoom(
     const lp = r.localParticipant;
     list.push({
       identity: lp.identity,
-      name: (lp.name || lp.identity || 'You').toString(),
+      name: (lp.name || lp.identity || t('call.you')).toString(),
       isLocal: true,
       isSpeaking: lp.isSpeaking,
       isMuted: !lp.isMicrophoneEnabled,
@@ -68,7 +70,7 @@ export function useCallRoom(
       );
       list.push({
         identity: p.identity,
-        name: (p.name || p.identity || 'Guest').toString(),
+        name: (p.name || p.identity || t('call.guest')).toString(),
         isLocal: false,
         isSpeaking: p.isSpeaking,
         isMuted: audioPub ? audioPub.isMuted : true,
@@ -77,7 +79,7 @@ export function useCallRoom(
       });
     }
     setPeers(list);
-  }, [room]);
+  }, [room, t]);
 
   useEffect(() => {
     const j = joinRef.current;
@@ -94,12 +96,12 @@ export function useCallRoom(
           await room.localParticipant.setCameraEnabled(videoRef.current);
           if (!videoRef.current) setCameraOff(true);
         } catch {
-          if (!disposed) setError('Could not access microphone/camera. Check permissions.');
+          if (!disposed) setError(t('call.errMicCam'));
         }
         snapshot();
       })
       .catch(() => {
-        if (!disposed) setError('Could not connect media. Check your connection.');
+        if (!disposed) setError(t('call.errConnect'));
       });
 
     const refresh = () => {
@@ -145,6 +147,7 @@ export function useCallRoom(
 
 /** Binds a participant's camera/mic tracks to media elements. */
 export function PeerTile({ peer }: { peer: RoomPeer }): React.ReactElement {
+  const t = useT();
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
@@ -192,8 +195,8 @@ export function PeerTile({ peer }: { peer: RoomPeer }): React.ReactElement {
       )}
       <audio ref={audioRef} autoPlay />
       <div className="peer-label">
-        <span>{peer.isLocal ? 'You' : peer.name}</span>
-        {peer.isMuted ? <span className="peer-flag" title="Muted">muted</span> : null}
+        <span>{peer.isLocal ? t('call.you') : peer.name}</span>
+        {peer.isMuted ? <span className="peer-flag" title={t('call.muted')}>{t('call.muted')}</span> : null}
       </div>
     </div>
   );

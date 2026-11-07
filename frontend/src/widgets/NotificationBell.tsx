@@ -5,6 +5,7 @@ import { useSettingsStore } from '../features/settings/settingsStore';
 import { ApiError } from '../shared/api/client';
 import { Icon } from '../shared/ui/Icon';
 import { useEscape } from '../shared/ui/useEscape';
+import { useT } from '../shared/i18n';
 
 /** Inbox bell: unread total badge + dropdown of unread conversations. */
 export function NotificationBell({
@@ -20,6 +21,7 @@ export function NotificationBell({
   const [error, setError] = useState<string | null>(null);
   const notificationsEnabled = useSettingsStore((s) => s.notificationsEnabled);
   const wrapRef = useRef<HTMLDivElement | null>(null);
+  const t = useT();
   useEscape(open, () => setOpen(false));
 
   useEffect(() => {
@@ -51,23 +53,23 @@ export function NotificationBell({
     <div className="bell-wrap" ref={wrapRef}>
       <button
         className="icon-btn bell-btn"
-        aria-label={totalUnread > 0 ? `Notifications, ${totalUnread} unread` : 'Notifications'}
+        aria-label={totalUnread > 0 ? t('notif.bellWithUnread', { count: totalUnread }) : t('notif.bell')}
         aria-expanded={open}
         aria-haspopup="menu"
-        title="Notifications"
+        title={t('notif.bell')}
         onClick={() => setOpen((v) => !v)}
       >
         <Icon name="bell" />
         {totalUnread > 0 ? <span className="bell-badge">{totalUnread > 99 ? '99+' : totalUnread}</span> : null}
       </button>
       {open ? (
-        <div className="bell-menu" role="menu" aria-label="Unread conversations">
+        <div className="bell-menu" role="menu" aria-label={t('notif.unreadConversations')}>
           {!notificationsEnabled ? (
-            <p className="hint bell-paused">Notifications are paused in settings.</p>
+            <p className="hint bell-paused">{t('notif.paused')}</p>
           ) : null}
-          {busy ? <p className="hint">Loading…</p> : null}
+          {busy ? <p className="hint">{t('common.loading')}</p> : null}
           {error ? <div className="form-error">{error}</div> : null}
-          {!busy && !error && items.length === 0 ? <p className="hint">All caught up.</p> : null}
+          {!busy && !error && items.length === 0 ? <p className="hint">{t('notif.allCaughtUp')}</p> : null}
           {items.map((n) => (
             <button
               key={n.chatId}
@@ -81,13 +83,13 @@ export function NotificationBell({
               <strong>
                 {n.title}
                 {n.isMuted ? (
-                  <span className="mute-ic" title="Muted">
+                  <span className="mute-ic" title={t('chat.muted')}>
                     <Icon name="mute" size={12} />
                   </span>
                 ) : null}
               </strong>
               <span className="hint">
-                {n.unreadCount} unread{n.preview ? ` · ${n.preview.slice(0, 80)}` : ''}
+                {t('notif.unreadCount', { count: n.unreadCount })}{n.preview ? ` · ${n.preview.slice(0, 80)}` : ''}
               </span>
             </button>
           ))}

@@ -9,13 +9,16 @@ import { useAvatarUrl } from '../features/auth/useAvatar';
 import { useSettingsStore } from '../features/settings/settingsStore';
 import type { Theme } from '../features/settings/settingsStore';
 import { ApiError } from '../shared/api/client';
+import { useLocaleTag, useT } from '../shared/i18n';
 import { Avatar } from '../shared/ui/Avatar';
 
-function fmtDate(iso: string): string {
-  return new Date(iso).toLocaleString();
+function fmtDate(iso: string, localeTag: string): string {
+  return new Date(iso).toLocaleString(localeTag);
 }
 
 export function ProfilePage() {
+  const t = useT();
+  const localeTag = useLocaleTag();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const user = useAuthStore((s) => s.user);
@@ -49,9 +52,9 @@ export function ProfilePage() {
       setUser(u);
       setDisplayName(u.displayName);
       setBio(u.bio);
-      setProfileMsg('Profile updated.');
+      setProfileMsg(t('profile.updated'));
     },
-    onError: (e) => setProfileMsg(e instanceof ApiError ? e.message : 'Update failed.'),
+    onError: (e) => setProfileMsg(e instanceof ApiError ? e.message : t('profile.updateFailed')),
   });
 
   const changePw = useMutation({
@@ -59,10 +62,10 @@ export function ProfilePage() {
     onSuccess: () => {
       setCurrentPw('');
       setNewPw('');
-      setPwMsg('Password changed. Other sessions were signed out.');
+      setPwMsg(t('profile.pwChanged'));
       void queryClient.invalidateQueries({ queryKey: ['sessions'] });
     },
-    onError: (e) => setPwMsg(e instanceof ApiError ? e.message : 'Change failed.'),
+    onError: (e) => setPwMsg(e instanceof ApiError ? e.message : t('profile.changeFailed')),
   });
 
   async function onAvatarFile(file: File | undefined): Promise<void> {
@@ -74,7 +77,7 @@ export function ProfilePage() {
       setAvatarBust((n) => n + 1);
       await queryClient.invalidateQueries({ queryKey: ['user', u.id] });
     } catch (e) {
-      setAvatarMsg(e instanceof ApiError ? e.message : 'Upload failed.');
+      setAvatarMsg(e instanceof ApiError ? e.message : t('profile.uploadFailed'));
     }
   }
 
@@ -85,7 +88,7 @@ export function ProfilePage() {
       setAvatarBust((n) => n + 1);
       await queryClient.invalidateQueries({ queryKey: ['user', u.id] });
     } catch (e) {
-      setAvatarMsg(e instanceof ApiError ? e.message : 'Remove failed.');
+      setAvatarMsg(e instanceof ApiError ? e.message : t('profile.removeFailed'));
     }
   }
 
@@ -93,7 +96,7 @@ export function ProfilePage() {
     return (
       <div className="center-page">
         <div className="card">
-          <p>Loading profile…</p>
+          <p>{t('profile.loading')}</p>
         </div>
       </div>
     );
@@ -102,10 +105,10 @@ export function ProfilePage() {
   return (
     <div className="center-page">
       <div className="card wide">
-        <Link to="/">← Back to chats</Link>
+        <Link to="/">{t('profile.back')}</Link>
         <div className="profile-hero">
           {avatarSrc ? (
-            <img className="avatar-img" src={avatarSrc} alt="Profile avatar" />
+            <img className="avatar-img" src={avatarSrc} alt={t('profile.avatarAlt')} />
           ) : (
             <Avatar name={user.displayName} color="#2aabee" size={96} />
           )}
@@ -120,15 +123,15 @@ export function ProfilePage() {
                   {r}
                 </span>
               ))}
-              {!user.isActive ? <span className="chip danger">deactivated</span> : null}
+              {!user.isActive ? <span className="chip danger">{t('profile.deactivated')}</span> : null}
             </div>
           </div>
         </div>
 
-        <h2>Avatar</h2>
+        <h2>{t('profile.avatar')}</h2>
         <div className="row-actions">
           <label className="ghost-btn inline">
-            Upload image
+            {t('common.uploadImage')}
             <input
               type="file"
               accept="image/jpeg,image/png,image/webp"
@@ -138,14 +141,14 @@ export function ProfilePage() {
           </label>
           {user.avatarUrl ? (
             <button className="ghost-btn inline" onClick={() => void onRemoveAvatar()}>
-              Remove
+              {t('common.remove')}
             </button>
           ) : null}
         </div>
-        <p className="hint">JPEG, PNG or WebP, max 2 MB.</p>
+        <p className="hint">{t('profile.avatarHint')}</p>
         {avatarMsg ? <div className="form-error">{avatarMsg}</div> : null}
 
-        <h2>Profile</h2>
+        <h2>{t('profile.profile')}</h2>
         <form
           onSubmit={(e: FormEvent) => {
             e.preventDefault();
@@ -153,38 +156,38 @@ export function ProfilePage() {
           }}
         >
           <div className="field">
-            <label htmlFor="pf-name">Display name</label>
+            <label htmlFor="pf-name">{t('profile.displayName')}</label>
             <input id="pf-name" value={displayName} onChange={(e) => setDisplayName(e.target.value)} maxLength={64} required />
           </div>
           <div className="field">
-            <label htmlFor="pf-bio">Bio</label>
+            <label htmlFor="pf-bio">{t('profile.bio')}</label>
             <input id="pf-bio" value={bio} onChange={(e) => setBio(e.target.value)} maxLength={255} />
           </div>
           {profileMsg ? <p className="hint">{profileMsg}</p> : null}
           <button className="primary-btn" type="submit" disabled={saveProfile.isPending}>
-            {saveProfile.isPending ? 'Saving…' : 'Save profile'}
+            {saveProfile.isPending ? t('common.saving') : t('profile.saveProfile')}
           </button>
         </form>
 
-        <h2>Preferences</h2>
+        <h2>{t('profile.preferences')}</h2>
         <form
           onSubmit={(e: FormEvent) => {
             e.preventDefault();
             void useSettingsStore
               .getState()
               .update(theme, notify)
-              .then(() => setSettingsMsg('Preferences saved.'))
+              .then(() => setSettingsMsg(t('profile.preferencesSaved')))
               .catch((err: unknown) =>
-                setSettingsMsg(err instanceof ApiError ? err.message : 'Save failed.'),
+                setSettingsMsg(err instanceof ApiError ? err.message : t('profile.saveFailed')),
               );
           }}
         >
           <div className="field">
-            <label htmlFor="pf-theme">Theme</label>
+            <label htmlFor="pf-theme">{t('profile.theme')}</label>
             <select id="pf-theme" value={theme} onChange={(e) => setTheme(e.target.value as Theme)}>
-              <option value="system">System</option>
-              <option value="light">Light</option>
-              <option value="dark">Dark</option>
+              <option value="system">{t('profile.themeSystem')}</option>
+              <option value="light">{t('profile.themeLight')}</option>
+              <option value="dark">{t('profile.themeDark')}</option>
             </select>
           </div>
           <div className="field check">
@@ -195,16 +198,16 @@ export function ProfilePage() {
                 checked={notify}
                 onChange={(e) => setNotify(e.target.checked)}
               />
-              In-app notifications (badges, toasts)
+              {t('profile.notify')}
             </label>
           </div>
           {settingsMsg ? <p className="hint">{settingsMsg}</p> : null}
           <button className="primary-btn" type="submit">
-            Save preferences
+            {t('profile.savePreferences')}
           </button>
         </form>
 
-        <h2>Password</h2>
+        <h2>{t('profile.password')}</h2>
         <form
           onSubmit={(e: FormEvent) => {
             e.preventDefault();
@@ -212,29 +215,29 @@ export function ProfilePage() {
           }}
         >
           <div className="field">
-            <label htmlFor="pf-cur">Current password</label>
+            <label htmlFor="pf-cur">{t('profile.currentPassword')}</label>
             <input id="pf-cur" type="password" value={currentPw} onChange={(e) => setCurrentPw(e.target.value)} required autoComplete="current-password" />
           </div>
           <div className="field">
-            <label htmlFor="pf-new">New password</label>
+            <label htmlFor="pf-new">{t('profile.newPassword')}</label>
             <input id="pf-new" type="password" value={newPw} onChange={(e) => setNewPw(e.target.value)} required minLength={8} autoComplete="new-password" />
           </div>
           {pwMsg ? <p className="hint">{pwMsg}</p> : null}
           <button className="primary-btn" type="submit" disabled={changePw.isPending}>
-            {changePw.isPending ? 'Changing…' : 'Change password'}
+            {changePw.isPending ? t('profile.changing') : t('profile.changePassword')}
           </button>
         </form>
 
-        <h2>Sessions</h2>
-        {sessionsQuery.isPending ? <p className="hint">Loading sessions…</p> : null}
+        <h2>{t('profile.sessions')}</h2>
+        {sessionsQuery.isPending ? <p className="hint">{t('profile.loadingSessions')}</p> : null}
         {sessionsQuery.data?.map((s) => (
           <div key={s.id} className="session-row">
             <div>
-              <strong>{s.deviceLabel ?? 'Unknown device'}</strong>
-              {s.isCurrent ? <span className="chip">this device</span> : null}
-              {s.isRevoked ? <span className="chip danger">revoked</span> : null}
+              <strong>{s.deviceLabel ?? t('profile.unknownDevice')}</strong>
+              {s.isCurrent ? <span className="chip">{t('common.thisDevice')}</span> : null}
+              {s.isRevoked ? <span className="chip danger">{t('common.revoked')}</span> : null}
               <div className="hint">
-                {s.ipAddress ?? 'no ip'} · last used {fmtDate(s.lastUsedAt)}
+                {s.ipAddress ?? t('profile.noIp')} · {t('profile.lastUsed', { date: fmtDate(s.lastUsedAt, localeTag) })}
               </div>
             </div>
             {!s.isRevoked ? (
@@ -249,7 +252,7 @@ export function ProfilePage() {
                     })
                 }
               >
-                Revoke
+                {t('common.revoke')}
               </button>
             ) : null}
           </div>
@@ -264,11 +267,11 @@ export function ProfilePage() {
               })
             }
           >
-            Sign out all devices
+            {t('profile.signOutAll')}
           </button>
           {isAdmin(user) ? (
             <Link className="ghost-btn inline" to="/admin">
-              User administration
+              {t('profile.adminLink')}
             </Link>
           ) : null}
           <button
@@ -277,7 +280,7 @@ export function ProfilePage() {
               void logout().then(() => navigate('/login'));
             }}
           >
-            Sign out
+            {t('common.signOut')}
           </button>
         </div>
       </div>
