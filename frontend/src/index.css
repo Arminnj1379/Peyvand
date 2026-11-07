@@ -501,6 +501,9 @@ input { font: inherit; color: inherit; }
 .chat-header .back-btn { display: none; }
 @media (max-width: 767px) { .chat-header .back-btn { display: inline-flex; } }
 .chat-peer { flex: 1; min-width: 0; cursor: default; }
+button.chat-peer-btn { text-align: start; cursor: pointer; border-radius: 10px; padding: 2px 8px; margin: -2px -8px; }
+button.chat-peer-btn:hover { background: var(--hover); }
+.chat-peer-name, .chat-peer-status { display: block; }
 .chat-peer-name { font-weight: 650; font-size: 15px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; letter-spacing: -0.005em; }
 .chat-peer-status {
   font-size: 12px; color: var(--text-secondary);

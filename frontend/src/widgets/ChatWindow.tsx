@@ -693,13 +693,18 @@ export function ChatWindow({
             online={chat.type === 'Dm' && peerOnline}
           />
         </button>
-        <div className="chat-peer">
-          <div className="chat-peer-name" dir="auto">{name}</div>
-          <div className="chat-peer-status">
+        <button
+          className="chat-peer chat-peer-btn"
+          onClick={onToggleDetails}
+          aria-pressed={detailsOpen}
+          title="Conversation info"
+        >
+          <span className="chat-peer-name" dir="auto">{name}</span>
+          <span className="chat-peer-status">
             {chat.type === 'Dm' && peerOnline ? <span className="online-dot" aria-hidden="true" /> : null}
             {statusLine}
-          </div>
-        </div>
+          </span>
+        </button>
         <div className="chat-actions">
           <button
             className="icon-btn"
