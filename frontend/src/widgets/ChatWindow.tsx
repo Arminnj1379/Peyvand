@@ -678,13 +678,21 @@ export function ChatWindow({
         <button className="icon-btn back-btn" onClick={onBack} aria-label="Back to list">
           <Icon name="back" />
         </button>
-        <UserAvatar
-          avatarUrl={chat.type === 'Dm' ? (peerProfile.data?.avatarUrl ?? null) : chat.avatarUrl}
-          name={name}
-          color={colorFor(chat.id)}
-          size={42}
-          online={chat.type === 'Dm' && peerOnline}
-        />
+        <button
+          className="header-avatar-btn"
+          onClick={onToggleDetails}
+          aria-label="Conversation info"
+          aria-pressed={detailsOpen}
+          title="Conversation info"
+        >
+          <UserAvatar
+            avatarUrl={chat.type === 'Dm' ? (peerProfile.data?.avatarUrl ?? null) : chat.avatarUrl}
+            name={name}
+            color={colorFor(chat.id)}
+            size={42}
+            online={chat.type === 'Dm' && peerOnline}
+          />
+        </button>
         <div className="chat-peer">
           <div className="chat-peer-name" dir="auto">{name}</div>
           <div className="chat-peer-status">
