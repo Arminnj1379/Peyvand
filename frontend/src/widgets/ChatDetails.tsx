@@ -68,14 +68,16 @@ function MemberRow({
             ))}
           </select>
           <button
-            className="ghost-btn small inline"
+            className="member-remove"
             onClick={() => onRemove(member.userId)}
+            aria-label={`Remove ${member.displayName}`}
+            title="Remove"
           >
-            Remove
+            <Icon name="trash" size={15} />
           </button>
         </span>
       ) : (
-        <span className="chip">{member.role}</span>
+        <span className={member.role === 'Owner' ? 'chip owner' : 'chip'}>{member.role}</span>
       )}
     </li>
   );
@@ -106,7 +108,9 @@ export function ChatDetails({
   const admin = isChatAdmin(chat, myUserId);
   const isOwner = chat.ownerId === myUserId;
   const name = chatDisplayName(chat, myUserId);
-  const peerId = chat.type === 'Dm' ? chat.members.find((m) => m.userId !== myUserId)?.userId : undefined;
+  // DM peer handle for the hero line (shared profile cache with list/header).
+  const peer = chat.type === 'Dm' ? chat.members.find((m) => m.userId !== myUserId) : undefined;
+  const peerId = peer?.userId;
 
   const pinsQuery = useQuery({
     queryKey: ['pins', chat.id],
@@ -251,23 +255,33 @@ export function ChatDetails({
         </button>
       </div>
       <div className="details-hero">
-        <UserAvatar
-          avatarUrl={heroAvatarUrl}
-          name={name}
-          color={colorFor(chat.id)}
-          size={72}
-        />
-        <div className="details-name">{name}</div>
+        <span className="hero-avatar">
+          <UserAvatar
+            avatarUrl={heroAvatarUrl}
+            name={name}
+            color={colorFor(chat.id)}
+            size={80}
+          />
+        </span>
+        <div className="details-name" dir="auto">{name}</div>
         <div className="details-sub">
-          {chat.type}
-          {chat.type === 'Channel' && chat.isPublic && chat.username ? ` · @${chat.username}` : ''}
-          {chat.type !== 'Dm' ? ` · ${chat.memberCount} members` : ''}
-          {chat.isMuted ? ' · muted' : ''}
+          {chat.type !== 'Dm' ? <span className="chip">{chat.type}</span> : null}
+          {peer ? <span dir="auto">@{peer.username}</span> : null}
+          {chat.type !== 'Dm' ? (
+            <span>{chat.memberCount} {chat.type === 'Channel' ? 'subscribers' : 'members'}</span>
+          ) : null}
+          {chat.type === 'Channel' && chat.isPublic && chat.username ? <span dir="auto">@{chat.username}</span> : null}
+          {chat.isMuted ? <span className="chip">muted</span> : null}
         </div>
-        {chat.description ? <p className="hint">{chat.description}</p> : null}
+        {chat.description ? <p className="details-desc" dir="auto">{chat.description}</p> : null}
       </div>
 
-      {error ? <div className="form-error">{error}</div> : null}
+      {error ? (
+        <div className="form-error" role="alert">
+          <Icon name="info" size={15} />
+          <span>{error}</span>
+        </div>
+      ) : null}
 
       {admin && chat.type !== 'Dm' ? (
         <>
@@ -281,16 +295,29 @@ export function ChatDetails({
             <input id="chat-desc" value={description} onChange={(e) => setDescription(e.target.value)} maxLength={512} />
           </div>
           <div className="row-actions">
-            <button className="ghost-btn inline" onClick={() => void saveProfile()}>
+            <button className="primary-btn inline" onClick={() => void saveProfile()}>
               Save profile
             </button>
           </div>
           <div className="field">
-            <label htmlFor="chat-avatar">Avatar</label>
+            <span className="field-label" id="chat-avatar-label">Avatar</span>
+            <div className="row-actions avatar-actions">
+              <label className="ghost-btn inline file-btn" htmlFor="chat-avatar">
+                <Icon name="image" size={15} />
+                Change photo
+              </label>
+              {chat.avatarUrl ? (
+                <button className="ghost-btn inline" onClick={() => void removeAvatar()}>
+                  Remove
+                </button>
+              ) : null}
+            </div>
             <input
               id="chat-avatar"
+              className="visually-hidden"
               type="file"
               accept="image/jpeg,image/png,image/webp"
+              aria-labelledby="chat-avatar-label"
               onChange={(e) => {
                 const f = e.target.files?.[0];
                 if (f) void onAvatar(f);
@@ -298,13 +325,6 @@ export function ChatDetails({
               }}
             />
           </div>
-          {chat.avatarUrl ? (
-            <div className="row-actions">
-              <button className="ghost-btn inline" onClick={() => void removeAvatar()}>
-                Remove avatar
-              </button>
-            </div>
-          ) : null}
         </>
       ) : null}
 
@@ -363,6 +383,7 @@ export function ChatDetails({
                 className="ghost-btn small inline"
                 onClick={() => void navigator.clipboard?.writeText(invite).catch(() => undefined)}
               >
+                <Icon name="copy" size={14} />
                 Copy
               </button>
             </div>
@@ -457,7 +478,8 @@ export function ChatDetails({
         </>
       ) : null}
 
-      <h3 className="details-h">Members ({chat.memberCount})</h3>      <ul className="member-list">
+      <h3 className="details-h">Members ({chat.memberCount})</h3>
+      <ul className="member-list">
         {chat.members.map((m) => (
           <MemberRow
             key={m.userId}
@@ -502,7 +524,7 @@ export function ChatDetails({
       ) : null}
 
       <h3 className="details-h">Preferences</h3>
-      <div className="row-actions">
+      <div className="row-actions even">
         <button
           className="ghost-btn inline"
           onClick={() => {
@@ -513,6 +535,7 @@ export function ChatDetails({
               .catch((e: unknown) => fail(e, 'Could not change mute.'));
           }}
         >
+          <Icon name={chat.isMuted ? 'bell' : 'mute'} size={15} />
           {chat.isMuted ? 'Unmute' : 'Mute'}
         </button>
         <button
@@ -525,6 +548,7 @@ export function ChatDetails({
               .catch((e: unknown) => fail(e, 'Could not change archive.'));
           }}
         >
+          <Icon name="archive" size={15} />
           {chat.isArchived ? 'Unarchive' : 'Archive'}
         </button>
       </div>
@@ -549,6 +573,7 @@ export function ChatDetails({
       {chat.type !== 'Dm' && chat.type !== 'Channel' ? (
         <div className="details-actions">
           <button
+            className="danger-text"
             onClick={() => {
               setError(null);
               void chatApi
