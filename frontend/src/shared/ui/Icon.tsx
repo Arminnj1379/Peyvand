@@ -36,7 +36,12 @@ export type IconName =
   | 'gift'
   | 'image'
   | 'stop'
-  | 'gif';
+  | 'gif'
+  | 'play'
+  | 'pause'
+  | 'volume'
+  | 'volumeOff'
+  | 'expand';
 
 function paths(name: IconName): string {
   switch (name) {
@@ -116,6 +121,16 @@ function paths(name: IconName): string {
       return '<rect x="6" y="6" width="12" height="12" rx="2" fill="currentColor"/>';
     case 'gif':
       return '<rect x="2" y="5" width="20" height="14" rx="3"/><text x="12" y="15.5" text-anchor="middle" font-size="8.5" font-weight="700" fill="currentColor" stroke="none" font-family="inherit">GIF</text>';
+    case 'play':
+      return '<polygon points="7 4 20 12 7 20 7 4" fill="currentColor" stroke="none"/>';
+    case 'pause':
+      return '<rect x="6" y="4" width="4" height="16" rx="1" fill="currentColor" stroke="none"/><rect x="14" y="4" width="4" height="16" rx="1" fill="currentColor" stroke="none"/>';
+    case 'volume':
+      return '<polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" fill="currentColor" stroke="none"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M18.6 5.4a9.2 9.2 0 0 1 0 13.2"/>';
+    case 'volumeOff':
+      return '<polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" fill="currentColor" stroke="none"/><line x1="23" y1="9" x2="17" y2="15"/><line x1="17" y1="9" x2="23" y2="15"/>';
+    case 'expand':
+      return '<path d="M8 3H5a2 2 0 0 0-2 2v3"/><path d="M16 3h3a2 2 0 0 1 2 2v3"/><path d="M8 21H5a2 2 0 0 1-2-2v-3"/><path d="M16 21h3a2 2 0 0 0 2-2v-3"/>';
   }
 }
 

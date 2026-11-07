@@ -4,6 +4,7 @@ import { formatSize } from '../features/files/fileTypes';
 import type { Attachment } from '../features/files/fileTypes';
 import type { Message } from '../features/messages/messageTypes';
 import { Icon } from '../shared/ui/Icon';
+import { MusicPlayer, VideoPlayer, VoicePlayer } from './players';
 
 /** Inline attachment rendering inside a bubble (images, video, audio, documents). */
 export function AttachmentView({
@@ -47,15 +48,7 @@ export function AttachmentView({
   if (attachment.kind === 'Video') {
     return url ? (
       <span className="attachment-media-wrap">
-        {/* Direct blob playback in-app: no external player, seek via preloaded blob. */}
-        <video
-          className="attachment-video"
-          src={url}
-          controls
-          preload="metadata"
-          playsInline
-          aria-label={attachment.fileName}
-        />
+        <VideoPlayer url={url} fileName={attachment.fileName} />
       </span>
     ) : (
       <span className="attachment-loading">Loading video…</span>
@@ -67,18 +60,11 @@ export function AttachmentView({
       attachment.fileName.toLowerCase().startsWith('voice-') ||
       attachment.fileName.toLowerCase().endsWith('.weba');
     return url ? (
-      <span className="attachment-audio-wrap">
-        <span className="attachment-audio-name" dir="auto" title={attachment.fileName}>
-          {isVoice ? '🎤' : '🎵'} {attachment.fileName}
-        </span>
-        <audio
-          className="attachment-audio"
-          src={url}
-          controls
-          preload="metadata"
-          aria-label={attachment.fileName}
-        />
-      </span>
+      isVoice ? (
+        <VoicePlayer url={url} fileId={attachment.fileId} />
+      ) : (
+        <MusicPlayer url={url} fileName={attachment.fileName} />
+      )
     ) : (
       <span className="attachment-loading">Loading audio…</span>
     );
