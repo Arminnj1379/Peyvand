@@ -51,7 +51,13 @@ function seekFromPointer(
   if (!el) return;
   const rect = el.getBoundingClientRect();
   if (rect.width <= 0) return;
-  const ratio = Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width));
+  let ratio = Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width));
+  // In RTL the waveform/fill grows from the right; mirror the pointer ratio.
+  try {
+    if (getComputedStyle(el).direction === 'rtl') ratio = 1 - ratio;
+  } catch {
+    // Non-DOM environment: keep the LTR ratio.
+  }
   apply(ratio);
 }
 
@@ -113,7 +119,7 @@ export function MusicPlayer({ url, fileName }: { url: string; fileName: string }
           }}
         >
           <span className="music-bar-fill" style={{ width: `${progress * 100}%` }} />
-          <span className="music-bar-knob" style={{ left: `${progress * 100}%` }} />
+          <span className="music-bar-knob" style={{ insetInlineStart: `${progress * 100}%` }} />
         </span>
         <span className="music-time">
           {formatMediaTime(time)} / {formatMediaTime(duration)}
@@ -148,6 +154,9 @@ export function VoicePlayer({ url, fileId }: { url: string; fileId: string }) {
   const [listened, setListened] = useState(false);
   const [time, setTime] = useState(0);
   const [duration, setDuration] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [failed, setFailed] = useState(false);
+  const [reloadKey, setReloadKey] = useState(0);
 
   const bars = useMemo(() => barsFor(fileId), [fileId]);
   const progress = duration > 0 ? Math.min(1, time / duration) : 0;
@@ -155,7 +164,7 @@ export function VoicePlayer({ url, fileId }: { url: string; fileId: string }) {
 
   function toggle(): void {
     const audio = audioRef.current;
-    if (!audio) return;
+    if (!audio || failed) return;
     if (audio.paused) {
       pauseOtherPlayers(audio);
       setListened(true);
@@ -165,15 +174,47 @@ export function VoicePlayer({ url, fileId }: { url: string; fileId: string }) {
     }
   }
 
+  function retry(): void {
+    setFailed(false);
+    setLoading(true);
+    setReloadKey((k) => k + 1);
+  }
+
+  if (failed) {
+    return (
+      <span className="voice-player voice-error">
+        <button
+          type="button"
+          className="tg-playbtn sm"
+          onClick={retry}
+          aria-label={t('common.retry')}
+          title={t('common.retry')}
+        >
+          <Icon name="refresh" size={18} />
+        </button>
+        <span className="voice-main">
+          <span className="voice-errmsg" role="alert">
+            {t('player.audioError')}
+          </span>
+        </span>
+      </span>
+    );
+  }
+
   return (
     <span className="voice-player">
       <button
         type="button"
         className="tg-playbtn sm"
         onClick={toggle}
+        disabled={loading}
         aria-label={playing ? t('player.pauseVoice') : t('player.playVoice')}
       >
-        <Icon name={playing ? 'pause' : 'play'} size={19} />
+        {loading ? (
+          <span className="tg-spinner" aria-hidden="true" />
+        ) : (
+          <Icon name={playing ? 'pause' : 'play'} size={19} />
+        )}
       </button>
       <span className="voice-main">
         <span
@@ -192,8 +233,13 @@ export function VoicePlayer({ url, fileId }: { url: string; fileId: string }) {
           onKeyDown={(e) => {
             const audio = audioRef.current;
             if (!audio || !Number.isFinite(audio.duration)) return;
-            if (e.key === 'ArrowRight') audio.currentTime = Math.min(audio.duration, audio.currentTime + 5);
-            if (e.key === 'ArrowLeft') audio.currentTime = Math.max(0, audio.currentTime - 5);
+            const rtl = barsRef.current
+              ? getComputedStyle(barsRef.current).direction === 'rtl'
+              : false;
+            const fwd = e.key === (rtl ? 'ArrowLeft' : 'ArrowRight');
+            const back = e.key === (rtl ? 'ArrowRight' : 'ArrowLeft');
+            if (fwd) audio.currentTime = Math.min(audio.duration, audio.currentTime + 5);
+            if (back) audio.currentTime = Math.max(0, audio.currentTime - 5);
           }}
         >
           {bars.map((h, i) => (
@@ -205,11 +251,12 @@ export function VoicePlayer({ url, fileId }: { url: string; fileId: string }) {
           ))}
         </span>
         <span className="voice-time">
-          {formatMediaTime(time > 0 || playing ? time : duration)}
+          {formatMediaTime(time)} / {formatMediaTime(duration)}
           {!listened ? <span className="voice-dot" aria-label={t('player.unplayed')} /> : null}
         </span>
       </span>
       <audio
+        key={reloadKey}
         ref={audioRef}
         data-tg-media
         src={url}
@@ -222,9 +269,17 @@ export function VoicePlayer({ url, fileId }: { url: string; fileId: string }) {
         onPause={() => setPlaying(false)}
         onEnded={() => setPlaying(false)}
         onTimeUpdate={(e) => setTime(e.currentTarget.currentTime)}
+        onWaiting={() => setLoading(true)}
+        onPlaying={() => setLoading(false)}
+        onCanPlay={() => setLoading(false)}
+        onError={() => {
+          setLoading(false);
+          setFailed(true);
+        }}
         onLoadedMetadata={(e) => {
           setDuration(Number.isFinite(e.currentTarget.duration) ? e.currentTarget.duration : 0);
           setTime(e.currentTarget.currentTime);
+          setLoading(false);
         }}
       />
     </span>

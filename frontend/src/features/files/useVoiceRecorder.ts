@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useT } from '../../shared/i18n';
 
 /**
  * In-app voice recording via MediaRecorder.
@@ -31,18 +32,31 @@ export function formatVoiceTime(totalSeconds: number): string {
 }
 
 export function useVoiceRecorder() {
+  const t = useT();
   const [state, setState] = useState<VoiceState>('idle');
   const [seconds, setSeconds] = useState(0);
   const [error, setError] = useState<string | null>(null);
+  /** Live mic levels (0..1, ~28 bands) for the recording waveform. Empty when idle. */
+  const [levels, setLevels] = useState<number[]>([]);
   const recorderRef = useRef<MediaRecorder | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const timerRef = useRef<number | null>(null);
+  const audioCtxRef = useRef<AudioContext | null>(null);
+  const meterTimerRef = useRef<number | null>(null);
 
   const cleanup = useCallback(() => {
     if (timerRef.current) {
       window.clearInterval(timerRef.current);
       timerRef.current = null;
+    }
+    if (meterTimerRef.current) {
+      window.clearInterval(meterTimerRef.current);
+      meterTimerRef.current = null;
+    }
+    if (audioCtxRef.current) {
+      void audioCtxRef.current.close().catch(() => undefined);
+      audioCtxRef.current = null;
     }
     if (streamRef.current) {
       streamRef.current.getTracks().forEach((t) => t.stop());
@@ -50,20 +64,54 @@ export function useVoiceRecorder() {
     }
     recorderRef.current = null;
     chunksRef.current = [];
+    setLevels([]);
   }, []);
 
   useEffect(() => cleanup, [cleanup]);
 
+  /**
+   * Live input meter for the recording waveform. Best-effort: when
+   * WebAudio is unavailable the UI falls back to a CSS pulse animation.
+   */
+  const startMeter = useCallback((stream: MediaStream) => {
+    try {
+      const Ctx = window.AudioContext ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+      if (!Ctx) return;
+      const ctx = new Ctx();
+      audioCtxRef.current = ctx;
+      const source = ctx.createMediaStreamSource(stream);
+      const analyser = ctx.createAnalyser();
+      analyser.fftSize = 64;
+      source.connect(analyser);
+      const bins = new Uint8Array(analyser.frequencyBinCount);
+      meterTimerRef.current = window.setInterval(() => {
+        analyser.getByteFrequencyData(bins);
+        const bands = 28;
+        const per = Math.max(1, Math.floor(bins.length / bands));
+        const next: number[] = [];
+        for (let i = 0; i < bands; i++) {
+          let sum = 0;
+          for (let j = 0; j < per && i * per + j < bins.length; j++) sum += bins[i * per + j];
+          next.push(Math.min(1, sum / (per * 128)));
+        }
+        setLevels(next);
+      }, 120);
+    } catch {
+      // Meter is decorative; recording works without it.
+    }
+  }, []);
+
   const start = useCallback(async () => {
     setError(null);
     if (typeof MediaRecorder === 'undefined' || !navigator.mediaDevices?.getUserMedia) {
-      setError('Voice recording is not supported in this browser.');
+      setError(t('chat.voiceNotSupported'));
       return false;
     }
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       streamRef.current = stream;
       chunksRef.current = [];
+      startMeter(stream);
       const mimeType =
         MIME_CANDIDATES.find((m) => {
           try {
@@ -87,15 +135,15 @@ export function useVoiceRecorder() {
     } catch (e) {
       cleanup();
       if (e instanceof DOMException && e.name === 'NotAllowedError') {
-        setError('Microphone access was denied. Allow it in the browser address bar and try again.');
+        setError(t('chat.micDenied'));
       } else if (e instanceof DOMException && e.name === 'NotFoundError') {
-        setError('No microphone found on this device.');
+        setError(t('chat.noMic'));
       } else {
-        setError('Could not start recording. Check the microphone and try again.');
+        setError(t('chat.recStartFailed'));
       }
       return false;
     }
-  }, [cleanup]);
+  }, [cleanup, t]);
 
   /** Stops recording and resolves with a voice File, or null when empty/cancelled. */
   const stop = useCallback(async (cancelled = false): Promise<File | null> => {
@@ -116,14 +164,14 @@ export function useVoiceRecorder() {
     if (cancelled || chunks.length === 0) return null;
     const blob = new Blob(chunks, { type: mime.split(';')[0] });
     if (blob.size === 0) {
-      setError('The recording was empty — nothing was sent.');
+      setError(t('chat.recEmpty'));
       return null;
     }
     const id = Date.now().toString(36);
     return new File([blob], `voice-${id}.${extensionFor(mime)}`, { type: blob.type });
-  }, [cleanup]);
+  }, [cleanup, t]);
 
   const cancel = useCallback(() => stop(true), [stop]);
 
-  return { state, seconds, error, start, stop, cancel, clearError: () => setError(null) };
+  return { state, seconds, levels, error, start, stop, cancel, clearError: () => setError(null) };
 }

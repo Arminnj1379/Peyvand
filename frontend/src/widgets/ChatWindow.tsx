@@ -1130,7 +1130,20 @@ export function ChatWindow({
         <div className="voice-bar" role="status" aria-label={t('chat.recordingLabel')}>
           <span className="voice-dot" aria-hidden="true" />
           <span className="voice-time">{formatVoiceTime(voice.seconds)}</span>
-          <span className="voice-hint">{t('chat.recording')}</span>
+          <span className="voice-live" aria-hidden="true">
+            {voice.levels.length > 0
+              ? voice.levels.map((v, i) => (
+                <i key={i} style={{ height: `${Math.round(4 + v * 22)}px` }} />
+              ))
+              : Array.from({ length: 24 }, (_, i) => (
+                <i
+                  key={i}
+                  className="live-idle"
+                  style={{ animationDelay: `${(i % 8) * 0.12}s` }}
+                />
+              ))}
+          </span>
+          <span className="visually-hidden">{t('chat.recording')}</span>
           <button
             type="button"
             className="icon-btn"

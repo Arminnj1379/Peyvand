@@ -188,6 +188,7 @@ registerStrings('en', {
   'player.unmute': 'Unmute',
   'player.fullscreen': 'Fullscreen',
   'player.seekVideo': 'Seek video',
+  'player.audioError': 'Voice message unavailable',
 
   'status.connecting': 'connecting…',
   'status.offline': 'backend offline',
@@ -387,6 +388,7 @@ registerStrings('fa', {
   'player.unmute': 'با صدا',
   'player.fullscreen': 'تمام‌صفحه',
   'player.seekVideo': 'تغییر زمان ویدیو',
+  'player.audioError': 'پیام صوتی در دسترس نیست',
 
   'status.connecting': 'در حال اتصال…',
   'status.offline': 'بک‌اند آفلاین',
