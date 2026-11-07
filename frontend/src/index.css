@@ -1429,10 +1429,17 @@ button.bubble-reply:hover { filter: brightness(0.97); }
 /* ── Auth & management pages ───────────────────────────────── */
 
 .center-page {
-  min-height: 100vh; min-height: 100dvh; display: flex; align-items: flex-start; justify-content: center;
+  min-height: 100vh; min-height: 100dvh;
+  /* Bound to the viewport so the inner scroll engages: html/body lock
+     page scroll (shell layout), so an unbounded min-height page would
+     grow past #root and its bottom would clip under the browser chrome. */
+  height: 100vh; height: 100dvh;
+  display: flex; align-items: flex-start; justify-content: center;
   padding: 48px 24px calc(48px + env(safe-area-inset-bottom));
   overflow-y: auto; overflow-x: hidden;
+  box-sizing: border-box;
 }
+.center-page > .card { flex-shrink: 0; }
 .card {
   width: min(400px, 100%); background: var(--panel-bg); border-radius: var(--r-xl);
   border: 1px solid var(--divider);
@@ -1507,8 +1514,9 @@ button.bubble-reply:hover { filter: brightness(0.97); }
 /* ── Profile & admin ───────────────────────────────────────── */
 
 .profile-hero { display: flex; gap: 16px; align-items: center; margin-top: 12px; }
-.profile-hero h1 { margin: 0; }
-.profile-hero p { margin: 2px 0 0; }
+.profile-hero > div { min-width: 0; flex: 1; }
+.profile-hero h1 { margin: 0; overflow-wrap: anywhere; }
+.profile-hero p { margin: 2px 0 0; overflow-wrap: anywhere; }
 .avatar-img { width: 88px; height: 88px; border-radius: 50%; object-fit: cover; flex-shrink: 0; }
 
 .chip-row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; align-items: center; }
@@ -1603,9 +1611,17 @@ button.chip:hover { filter: brightness(0.96); }
   .dialog-backdrop { padding: 12px; padding-bottom: calc(12px + env(safe-area-inset-bottom)); }
   .dialog { padding: 16px; }
 
-  .profile-hero { flex-direction: column; text-align: center; }
+  .profile-hero { flex-direction: column; text-align: center; align-items: center; }
+  .profile-hero > div { width: 100%; }
+  .profile-hero .chip-row { justify-content: center; }
   .center-page { padding: 24px 16px calc(24px + env(safe-area-inset-bottom)); }
   .card { padding: 22px 18px; }
+  .session-row { align-items: flex-start; }
+  .session-row .ghost-btn { width: 100%; }
+
+@media (max-width: 480px) {
+  .row-actions .ghost-btn.inline { flex: 1 1 100%; }
+}
 
   .thread-parent { overflow-wrap: anywhere; }
 }
