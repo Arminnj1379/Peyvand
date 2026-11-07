@@ -100,7 +100,7 @@ public sealed class AdvancedHandlerTests
         var newcomer = await ctx.SeedUserAsync("inv.new");
         var chat = await SeedGroupAsync(ctx, owner, member);
 
-        var denied = await new GroupService(ctx.Chats, ctx.Users, ctx.Avatars, ctx.Clock)
+        var denied = await new GroupService(ctx.Chats, ctx.Users, ctx.Avatars, ctx.Messages, ctx.Files, ctx.Ids, ctx.Clock)
             .AddMemberAsync(new AddMemberCommand(chat.Id, newcomer.Id), ctx.As(member), CancellationToken.None);
         Assert.True(denied.IsFailure);
         Assert.Equal(ChatErrors.NotAdmin, denied.Error);
@@ -108,10 +108,10 @@ public sealed class AdvancedHandlerTests
         await new ConversationService(ctx.Chats, ctx.Users, ctx.Ids, ctx.Clock)
             .UpdateGroupAsync(new UpdateGroupCommand(chat.Id, null, null, true), ctx.As(owner), CancellationToken.None);
 
-        var allowed = await new GroupService(ctx.Chats, ctx.Users, ctx.Avatars, ctx.Clock)
+        var allowed = await new GroupService(ctx.Chats, ctx.Users, ctx.Avatars, ctx.Messages, ctx.Files, ctx.Ids, ctx.Clock)
             .AddMemberAsync(new AddMemberCommand(chat.Id, newcomer.Id), ctx.As(member), CancellationToken.None);
         Assert.True(allowed.IsSuccess);
-        Assert.Equal(3, allowed.Value!.MemberCount);
+        Assert.Equal(3, allowed.Value!.Chat.MemberCount);
     }
 
     [Fact]
@@ -123,7 +123,7 @@ public sealed class AdvancedHandlerTests
         var stranger = await ctx.SeedUserAsync("ci.stranger");
         var chat = await SeedChannelAsync(ctx, owner, false, null, sub);
 
-        var denied = await new GroupService(ctx.Chats, ctx.Users, ctx.Avatars, ctx.Clock)
+        var denied = await new GroupService(ctx.Chats, ctx.Users, ctx.Avatars, ctx.Messages, ctx.Files, ctx.Ids, ctx.Clock)
             .AddMemberAsync(new AddMemberCommand(chat.Id, stranger.Id), ctx.As(sub), CancellationToken.None);
         Assert.True(denied.IsFailure);
         Assert.Equal(ChatErrors.NotAdmin, denied.Error);
@@ -158,31 +158,31 @@ public sealed class AdvancedHandlerTests
         var joiner = await ctx.SeedUserAsync("lnk.joiner");
         var chat = await SeedGroupAsync(ctx, owner, member);
 
-        var denied = await new GroupService(ctx.Chats, ctx.Users, ctx.Avatars, ctx.Clock)
+        var denied = await new GroupService(ctx.Chats, ctx.Users, ctx.Avatars, ctx.Messages, ctx.Files, ctx.Ids, ctx.Clock)
             .RotateInviteAsync(new RotateInviteCommand(chat.Id), ctx.As(member), CancellationToken.None);
         Assert.True(denied.IsFailure);
 
-        var rotated = await new GroupService(ctx.Chats, ctx.Users, ctx.Avatars, ctx.Clock)
+        var rotated = await new GroupService(ctx.Chats, ctx.Users, ctx.Avatars, ctx.Messages, ctx.Files, ctx.Ids, ctx.Clock)
             .RotateInviteAsync(new RotateInviteCommand(chat.Id), ctx.As(owner), CancellationToken.None);
         Assert.True(rotated.IsSuccess);
         Assert.NotEmpty(rotated.Value!);
 
-        var joined = await new GroupService(ctx.Chats, ctx.Users, ctx.Avatars, ctx.Clock)
+        var joined = await new GroupService(ctx.Chats, ctx.Users, ctx.Avatars, ctx.Messages, ctx.Files, ctx.Ids, ctx.Clock)
             .JoinViaInviteAsync(new JoinViaInviteCommand(rotated.Value), ctx.As(joiner), CancellationToken.None);
         Assert.True(joined.IsSuccess);
-        Assert.Contains(joined.Value!.Members, m => m.UserId == joiner.Id && m.Role == "Member");
+        Assert.Contains(joined.Value!.Chat.Members, m => m.UserId == joiner.Id && m.Role == "Member");
 
-        var badCode = await new GroupService(ctx.Chats, ctx.Users, ctx.Avatars, ctx.Clock)
+        var badCode = await new GroupService(ctx.Chats, ctx.Users, ctx.Avatars, ctx.Messages, ctx.Files, ctx.Ids, ctx.Clock)
             .JoinViaInviteAsync(new JoinViaInviteCommand("deadbeef"), ctx.As(joiner), CancellationToken.None);
         Assert.True(badCode.IsFailure);
         Assert.Equal(ChatErrors.InviteInvalid, badCode.Error);
 
         // Revoke kills the link.
-        var revoked = await new GroupService(ctx.Chats, ctx.Users, ctx.Avatars, ctx.Clock)
+        var revoked = await new GroupService(ctx.Chats, ctx.Users, ctx.Avatars, ctx.Messages, ctx.Files, ctx.Ids, ctx.Clock)
             .RevokeInviteAsync(new RevokeInviteCommand(chat.Id), ctx.As(owner), CancellationToken.None);
         Assert.True(revoked.IsSuccess);
         var late = await ctx.SeedUserAsync("lnk.late");
-        var afterRevoke = await new GroupService(ctx.Chats, ctx.Users, ctx.Avatars, ctx.Clock)
+        var afterRevoke = await new GroupService(ctx.Chats, ctx.Users, ctx.Avatars, ctx.Messages, ctx.Files, ctx.Ids, ctx.Clock)
             .JoinViaInviteAsync(new JoinViaInviteCommand(rotated.Value), ctx.As(late), CancellationToken.None);
         Assert.True(afterRevoke.IsFailure);
         Assert.Equal(ChatErrors.InviteInvalid, afterRevoke.Error);
@@ -197,26 +197,26 @@ public sealed class AdvancedHandlerTests
         var pub = await SeedChannelAsync(ctx, owner, true, "openchan");
         var priv = await SeedChannelAsync(ctx, owner, false, null);
 
-        var ok = await new GroupService(ctx.Chats, ctx.Users, ctx.Avatars, ctx.Clock)
+        var ok = await new GroupService(ctx.Chats, ctx.Users, ctx.Avatars, ctx.Messages, ctx.Files, ctx.Ids, ctx.Clock)
             .SubscribeChannelAsync(new SubscribeChannelCommand(pub.Id), ctx.As(fan), CancellationToken.None);
         Assert.True(ok.IsSuccess);
         Assert.Contains(ok.Value!.Members, m => m.UserId == fan.Id && m.Role == "Subscriber");
 
-        var again = await new GroupService(ctx.Chats, ctx.Users, ctx.Avatars, ctx.Clock)
+        var again = await new GroupService(ctx.Chats, ctx.Users, ctx.Avatars, ctx.Messages, ctx.Files, ctx.Ids, ctx.Clock)
             .SubscribeChannelAsync(new SubscribeChannelCommand(pub.Id), ctx.As(fan), CancellationToken.None);
         Assert.True(again.IsFailure);
         Assert.Equal(ChatErrors.AlreadySubscribed, again.Error);
 
-        var denied = await new GroupService(ctx.Chats, ctx.Users, ctx.Avatars, ctx.Clock)
+        var denied = await new GroupService(ctx.Chats, ctx.Users, ctx.Avatars, ctx.Messages, ctx.Files, ctx.Ids, ctx.Clock)
             .SubscribeChannelAsync(new SubscribeChannelCommand(priv.Id), ctx.As(fan), CancellationToken.None);
         Assert.True(denied.IsFailure);
         Assert.Equal(ChatErrors.InviteRequired, denied.Error);
 
-        var left = await new GroupService(ctx.Chats, ctx.Users, ctx.Avatars, ctx.Clock)
+        var left = await new GroupService(ctx.Chats, ctx.Users, ctx.Avatars, ctx.Messages, ctx.Files, ctx.Ids, ctx.Clock)
             .UnsubscribeChannelAsync(new UnsubscribeChannelCommand(pub.Id), ctx.As(fan), CancellationToken.None);
         Assert.True(left.IsSuccess);
 
-        var notSubbed = await new GroupService(ctx.Chats, ctx.Users, ctx.Avatars, ctx.Clock)
+        var notSubbed = await new GroupService(ctx.Chats, ctx.Users, ctx.Avatars, ctx.Messages, ctx.Files, ctx.Ids, ctx.Clock)
             .UnsubscribeChannelAsync(new UnsubscribeChannelCommand(pub.Id), ctx.As(fan), CancellationToken.None);
         Assert.True(notSubbed.IsFailure);
         Assert.Equal(ChatErrors.NotSubscribed, notSubbed.Error);
@@ -346,7 +346,7 @@ public sealed class AdvancedHandlerTests
         var sent = await SendAsync(ctx, member, chat.Id, "keep me", "k-1");
 
         // Promote one member to admin: admins still cannot delete.
-        var promoted = await new GroupService(ctx.Chats, ctx.Users, ctx.Avatars, ctx.Clock)
+        var promoted = await new GroupService(ctx.Chats, ctx.Users, ctx.Avatars, ctx.Messages, ctx.Files, ctx.Ids, ctx.Clock)
             .SetMemberRoleAsync(new SetMemberRoleCommand(chat.Id, admin.Id, "Admin"), ctx.As(owner), CancellationToken.None);
         Assert.True(promoted.IsSuccess);
 
@@ -443,11 +443,11 @@ public sealed class AdvancedHandlerTests
         var chat = await SeedGroupAsync(ctx, owner, member);
         var png = new byte[] { 0x89, 0x50, 0x4E, 0x47, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
 
-        var denied = await new GroupService(ctx.Chats, ctx.Users, ctx.Avatars, ctx.Clock)
+        var denied = await new GroupService(ctx.Chats, ctx.Users, ctx.Avatars, ctx.Messages, ctx.Files, ctx.Ids, ctx.Clock)
             .UploadChatAvatarAsync(new UploadChatAvatarCommand(chat.Id, png, "image/png"), ctx.As(member), CancellationToken.None);
         Assert.True(denied.IsFailure);
 
-        var ok = await new GroupService(ctx.Chats, ctx.Users, ctx.Avatars, ctx.Clock)
+        var ok = await new GroupService(ctx.Chats, ctx.Users, ctx.Avatars, ctx.Messages, ctx.Files, ctx.Ids, ctx.Clock)
             .UploadChatAvatarAsync(new UploadChatAvatarCommand(chat.Id, png, "image/png"), ctx.As(owner), CancellationToken.None);
         Assert.True(ok.IsSuccess);
         Assert.NotNull(ok.Value!.AvatarUrl);

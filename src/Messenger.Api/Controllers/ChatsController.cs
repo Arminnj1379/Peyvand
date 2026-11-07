@@ -4,6 +4,7 @@ using Messenger.Api.Hubs;
 using Messenger.Application.Features.Chats;
 using Messenger.Application.Messaging;
 using Messenger.Application.Services.Interfaces;
+using Messenger.Domain.Common;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.SignalR;
@@ -70,6 +71,12 @@ public sealed class ChatsController(
     private Task NotifyChatAsync(string id, CancellationToken ct) =>
         hub.Clients.Group(MessengerHub.ChatGroup(id))
             .SendAsync("chat:updated", new { chatId = id }, ct);
+
+    private static IResult ToChatHttp(
+        Result<MembershipChangeResult> result, int successCode = 200) =>
+        result.IsSuccess
+            ? ResultMapper.ToHttp(Result<ChatDto>.Ok(result.Value!.Chat), successCode)
+            : ResultMapper.Problem(result.Error);
 
     [HttpPost("dm")]
     [ProducesResponseType(typeof(ChatDto), StatusCodes.Status200OK)]
@@ -156,9 +163,14 @@ public sealed class ChatsController(
             await NotifyChatAsync(id, ct).ConfigureAwait(false);
             // The added member's open connections are not in the chat group yet.
             await NotifyMembersAsync([req.UserId], id, ct).ConfigureAwait(false);
+            if (result.Value!.SystemMessage is not null)
+            {
+                await hub.Clients.Group(MessengerHub.ChatGroup(id))
+                    .SendAsync("message:new", result.Value.SystemMessage, ct).ConfigureAwait(false);
+            }
         }
 
-        return ResultMapper.ToHttp(result);
+        return ToChatHttp(result);
     }
 
     [HttpDelete("{id}/members/{userId}")]
@@ -176,9 +188,14 @@ public sealed class ChatsController(
             // The removed member's connections stay in the chat group until
             // they resubscribe; tell them directly so the stale chat drops live.
             await NotifyMembersAsync([userId], id, ct).ConfigureAwait(false);
+            if (result.Value!.SystemMessage is not null)
+            {
+                await hub.Clients.Group(MessengerHub.ChatGroup(id))
+                    .SendAsync("message:new", result.Value.SystemMessage, ct).ConfigureAwait(false);
+            }
         }
 
-        return ResultMapper.ToHttp(result);
+        return ToChatHttp(result);
     }
 
     [HttpPost("{id}/leave")]
@@ -192,9 +209,16 @@ public sealed class ChatsController(
         if (result.IsSuccess)
         {
             await NotifyChatAsync(id, ct).ConfigureAwait(false);
+            if (result.Value!.SystemMessage is not null)
+            {
+                await hub.Clients.Group(MessengerHub.ChatGroup(id))
+                    .SendAsync("message:new", result.Value.SystemMessage, ct).ConfigureAwait(false);
+            }
         }
 
-        return ResultMapper.ToHttp(result);
+        return result.IsSuccess
+            ? ResultMapper.ToHttp(Result.Ok())
+            : ResultMapper.Problem(result.Error);
     }
 
     [HttpDelete("{id}")]
@@ -393,11 +417,16 @@ public sealed class ChatsController(
         if (result.IsSuccess)
         {
             // Existing members' details panels show a stale roster otherwise.
-            await hub.Clients.Group(MessengerHub.ChatGroup(result.Value!.Id))
-                .SendAsync("chat:updated", new { chatId = result.Value.Id }, ct).ConfigureAwait(false);
+            await hub.Clients.Group(MessengerHub.ChatGroup(result.Value!.Chat.Id))
+                .SendAsync("chat:updated", new { chatId = result.Value.Chat.Id }, ct).ConfigureAwait(false);
+            if (result.Value.SystemMessage is not null)
+            {
+                await hub.Clients.Group(MessengerHub.ChatGroup(result.Value.Chat.Id))
+                    .SendAsync("message:new", result.Value.SystemMessage, ct).ConfigureAwait(false);
+            }
         }
 
-        return ResultMapper.ToHttp(result, 200);
+        return ToChatHttp(result, 200);
     }
 
     [HttpPost("{id}/subscribe")]

@@ -9,11 +9,11 @@ namespace Messenger.Application.Services.Interfaces;
 /// </summary>
 public interface IGroupService
 {
-    Task<Result<ChatDto>> AddMemberAsync(AddMemberCommand command, CallerContext caller, CancellationToken ct);
+    Task<Result<MembershipChangeResult>> AddMemberAsync(AddMemberCommand command, CallerContext caller, CancellationToken ct);
 
-    Task<Result<ChatDto>> RemoveMemberAsync(RemoveMemberCommand command, CallerContext caller, CancellationToken ct);
+    Task<Result<MembershipChangeResult>> RemoveMemberAsync(RemoveMemberCommand command, CallerContext caller, CancellationToken ct);
 
-    Task<Result> LeaveChatAsync(LeaveChatCommand command, CallerContext caller, CancellationToken ct);
+    Task<Result<MembershipChangeResult>> LeaveChatAsync(LeaveChatCommand command, CallerContext caller, CancellationToken ct);
 
     Task<Result<ChatDto>> SetMemberRoleAsync(SetMemberRoleCommand command, CallerContext caller, CancellationToken ct);
 
@@ -23,7 +23,7 @@ public interface IGroupService
 
     Task<Result> RevokeInviteAsync(RevokeInviteCommand command, CallerContext caller, CancellationToken ct);
 
-    Task<Result<ChatDto>> JoinViaInviteAsync(JoinViaInviteCommand command, CallerContext caller, CancellationToken ct);
+    Task<Result<MembershipChangeResult>> JoinViaInviteAsync(JoinViaInviteCommand command, CallerContext caller, CancellationToken ct);
 
     Task<Result<ChatDto>> SubscribeChannelAsync(SubscribeChannelCommand command, CallerContext caller, CancellationToken ct);
 

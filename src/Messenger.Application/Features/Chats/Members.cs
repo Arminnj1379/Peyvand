@@ -1,4 +1,5 @@
 using FluentValidation;
+using Messenger.Application.Messaging;
 using Messenger.Domain.Chats;
 
 namespace Messenger.Application.Features.Chats;
@@ -11,6 +12,9 @@ public sealed record RemoveMemberCommand(string ChatId, string UserId);
 public sealed record LeaveChatCommand(string ChatId);
 
 public sealed record SetMemberRoleCommand(string ChatId, string UserId, string Role);
+
+/// <summary>Membership change plus the system message recorded for it in history.</summary>
+public sealed record MembershipChangeResult(ChatDto Chat, MessageDto? SystemMessage);
 
 public sealed class AddMemberValidator : AbstractValidator<AddMemberCommand>
 {

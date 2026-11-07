@@ -835,6 +835,17 @@ export function ChatWindow({
           />
         ) : null}
         {flat.map((m, i) => {
+          // Membership service messages render as a centered pill, not a bubble.
+          if (m.kind === 'System') {
+            const prev = flat[i - 1];
+            const showDay = !prev || dayKey(prev.createdAt) !== dayKey(m.createdAt);
+            return (
+              <Fragment key={m.id}>
+                {showDay ? <div className="day-divider" role="separator" aria-label={formatDayLabel(m.createdAt)}>{formatDayLabel(m.createdAt)}</div> : null}
+                <div className="system-divider" role="note"><span dir="auto">{m.body}</span></div>
+              </Fragment>
+            );
+          }
           const prev = flat[i - 1];
           const showDay = !prev || dayKey(prev.createdAt) !== dayKey(m.createdAt);
           const mine = m.senderId === myUserId;

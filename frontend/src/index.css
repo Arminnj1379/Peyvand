@@ -554,6 +554,16 @@ input { font: inherit; color: inherit; }
   .day-divider { transition: none; }
 }
 
+/* Membership service messages ("Ali left the group"): centered pill, no bubble. */
+.system-divider {
+  align-self: center; width: fit-content; max-width: 90%;
+  font-size: 12px; font-weight: 500; text-align: center;
+  color: var(--text-strong, #fff);
+  background: rgb(0 0 0 / 0.30);
+  border-radius: 12px; padding: 4px 14px; margin: 6px 0;
+  overflow-wrap: anywhere;
+}
+
 .bubble-row { display: flex; }
 .bubble-row.mine { justify-content: flex-end; }
 /* Grouped: consecutive simple messages from one sender collapse together (2–3px). */

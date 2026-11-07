@@ -2,22 +2,30 @@ using System.Security.Cryptography;
 using FluentValidation;
 using Messenger.Application.Abstractions;
 using Messenger.Application.Features.Chats;
+using Messenger.Application.Features.Messages;
 using Messenger.Application.Messaging;
 using Messenger.Application.Services.Interfaces;
 using Messenger.Domain.Chats;
 using Messenger.Domain.Common;
+using Messenger.Domain.Messages;
 using Messenger.Domain.Users;
 
 namespace Messenger.Application.Services.Implementations;
 
-/// <summary>Group collaboration. Logic moved verbatim from the former MediatR handlers.</summary>
+/// <summary>
+/// Group collaboration. Membership changes (add/remove/leave/join) record an
+/// English system message in history so the change is visible to members.
+/// </summary>
 public sealed class GroupService(
     IChatStore chats,
     IUserStore users,
     IAvatarStorage avatars,
+    IMessageStore messages,
+    IFileStore files,
+    IIdGenerator ids,
     IClock clock) : IGroupService
 {
-    public async Task<Result<ChatDto>> AddMemberAsync(
+    public async Task<Result<MembershipChangeResult>> AddMemberAsync(
         AddMemberCommand command, CallerContext caller, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(command);
@@ -26,21 +34,21 @@ public sealed class GroupService(
 
         if (caller.UserId is null)
         {
-            return Result<ChatDto>.Fail(ChatAccess.Unauthenticated());
+            return Result<MembershipChangeResult>.Fail(ChatAccess.Unauthenticated());
         }
 
         var chat = await chats.GetByIdAsync(command.ChatId, ct).ConfigureAwait(false);
         var member = ChatAccess.RequireMember(chat, caller.UserId);
         if (member.IsFailure)
         {
-            return Result<ChatDto>.Fail(member.Error);
+            return Result<MembershipChangeResult>.Fail(member.Error);
         }
 
         // Admins always; plain members only when the group allows member invites.
         // (Channels never allow subscriber invites — admins only.)
         if (!member.Value!.CanInvite(caller.UserId))
         {
-            return Result<ChatDto>.Fail(ChatErrors.NotAdmin);
+            return Result<MembershipChangeResult>.Fail(ChatErrors.NotAdmin);
         }
 
         var admin = member;
@@ -48,22 +56,32 @@ public sealed class GroupService(
         var target = await users.GetByIdAsync(command.UserId, ct).ConfigureAwait(false);
         if (target is null || !target.IsActive)
         {
-            return Result<ChatDto>.Fail(UserErrors.NotFound);
+            return Result<MembershipChangeResult>.Fail(UserErrors.NotFound);
         }
 
         var role = chat!.Type == ChatType.Channel ? ChatRole.Subscriber : ChatRole.Member;
         var added = admin.Value!.AddMember(target.Id, role, clock.UtcNow);
         if (added.IsFailure)
         {
-            return Result<ChatDto>.Fail(added.Error);
+            return Result<MembershipChangeResult>.Fail(added.Error);
+        }
+
+        var adder = await users.GetByIdAsync(caller.UserId, ct).ConfigureAwait(false);
+        var system = await AppendSystemMessageAsync(
+            admin.Value, $"{adder?.DisplayName ?? "Someone"} added {target.DisplayName}",
+            caller.UserId, ct).ConfigureAwait(false);
+        if (system.IsFailure)
+        {
+            return Result<MembershipChangeResult>.Fail(system.Error);
         }
 
         await chats.UpdateAsync(admin.Value, ct).ConfigureAwait(false);
-        return Result<ChatDto>.Ok(
-            await ChatQueries.EnrichAsync(chats, users, admin.Value, caller.UserId, ct).ConfigureAwait(false));
+        return Result<MembershipChangeResult>.Ok(new MembershipChangeResult(
+            await ChatQueries.EnrichAsync(chats, users, admin.Value, caller.UserId, ct).ConfigureAwait(false),
+            system.Value!));
     }
 
-    public async Task<Result<ChatDto>> RemoveMemberAsync(
+    public async Task<Result<MembershipChangeResult>> RemoveMemberAsync(
         RemoveMemberCommand command, CallerContext caller, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(command);
@@ -72,28 +90,39 @@ public sealed class GroupService(
 
         if (caller.UserId is null)
         {
-            return Result<ChatDto>.Fail(ChatAccess.Unauthenticated());
+            return Result<MembershipChangeResult>.Fail(ChatAccess.Unauthenticated());
         }
 
         var chat = await chats.GetByIdAsync(command.ChatId, ct).ConfigureAwait(false);
         var admin = ChatAccess.RequireAdmin(chat, caller.UserId);
         if (admin.IsFailure)
         {
-            return Result<ChatDto>.Fail(admin.Error);
+            return Result<MembershipChangeResult>.Fail(admin.Error);
         }
 
+        var target = await users.GetByIdAsync(command.UserId, ct).ConfigureAwait(false);
         var removed = admin.Value!.RemoveMember(command.UserId, clock.UtcNow);
         if (removed.IsFailure)
         {
-            return Result<ChatDto>.Fail(removed.Error);
+            return Result<MembershipChangeResult>.Fail(removed.Error);
+        }
+
+        var actor = await users.GetByIdAsync(caller.UserId, ct).ConfigureAwait(false);
+        var system = await AppendSystemMessageAsync(
+            admin.Value, $"{actor?.DisplayName ?? "Someone"} removed {target?.DisplayName ?? "a member"}",
+            caller.UserId, ct).ConfigureAwait(false);
+        if (system.IsFailure)
+        {
+            return Result<MembershipChangeResult>.Fail(system.Error);
         }
 
         await chats.UpdateAsync(admin.Value, ct).ConfigureAwait(false);
-        return Result<ChatDto>.Ok(
-            await ChatQueries.EnrichAsync(chats, users, admin.Value, caller.UserId, ct).ConfigureAwait(false));
+        return Result<MembershipChangeResult>.Ok(new MembershipChangeResult(
+            await ChatQueries.EnrichAsync(chats, users, admin.Value, caller.UserId, ct).ConfigureAwait(false),
+            system.Value!));
     }
 
-    public async Task<Result> LeaveChatAsync(
+    public async Task<Result<MembershipChangeResult>> LeaveChatAsync(
         LeaveChatCommand command, CallerContext caller, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(command);
@@ -102,24 +131,36 @@ public sealed class GroupService(
 
         if (caller.UserId is null)
         {
-            return Result.Fail(ChatAccess.Unauthenticated());
+            return Result<MembershipChangeResult>.Fail(ChatAccess.Unauthenticated());
         }
 
         var chat = await chats.GetByIdAsync(command.ChatId, ct).ConfigureAwait(false);
         var member = ChatAccess.RequireMember(chat, caller.UserId);
         if (member.IsFailure)
         {
-            return Result.Fail(member.Error);
+            return Result<MembershipChangeResult>.Fail(member.Error);
         }
 
+        var leaver = await users.GetByIdAsync(caller.UserId, ct).ConfigureAwait(false);
         var left = member.Value!.RemoveMember(caller.UserId, clock.UtcNow);
         if (left.IsFailure)
         {
-            return left;
+            return Result<MembershipChangeResult>.Fail(left.Error);
+        }
+
+        var noun = member.Value.Type == ChatType.Channel ? "channel" : "group";
+        var system = await AppendSystemMessageAsync(
+            member.Value, $"{leaver?.DisplayName ?? "Someone"} left the {noun}",
+            caller.UserId, ct).ConfigureAwait(false);
+        if (system.IsFailure)
+        {
+            return Result<MembershipChangeResult>.Fail(system.Error);
         }
 
         await chats.UpdateAsync(member.Value, ct).ConfigureAwait(false);
-        return Result.Ok();
+        return Result<MembershipChangeResult>.Ok(new MembershipChangeResult(
+            await ChatQueries.EnrichAsync(chats, users, member.Value, caller.UserId, ct).ConfigureAwait(false),
+            system.Value!));
     }
 
     public async Task<Result<ChatDto>> SetMemberRoleAsync(
@@ -258,7 +299,7 @@ public sealed class GroupService(
         return Result.Ok();
     }
 
-    public async Task<Result<ChatDto>> JoinViaInviteAsync(
+    public async Task<Result<MembershipChangeResult>> JoinViaInviteAsync(
         JoinViaInviteCommand command, CallerContext caller, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(command);
@@ -267,39 +308,48 @@ public sealed class GroupService(
 
         if (caller.UserId is null)
         {
-            return Result<ChatDto>.Fail(ChatAccess.Unauthenticated());
+            return Result<MembershipChangeResult>.Fail(ChatAccess.Unauthenticated());
         }
 
         var callerId = caller.UserId;
         var self = await users.GetByIdAsync(callerId, ct).ConfigureAwait(false);
         if (self is null || !self.IsActive)
         {
-            return Result<ChatDto>.Fail(UserErrors.NotFound);
+            return Result<MembershipChangeResult>.Fail(UserErrors.NotFound);
         }
 
         var chat = await chats.GetByInviteCodeAsync(command.Code.Trim(), ct).ConfigureAwait(false);
         if (chat is null || chat.IsDeleted || chat.Type == ChatType.Dm)
         {
             // Neutral: revoked and never-existed codes look identical.
-            return Result<ChatDto>.Fail(ChatErrors.InviteInvalid);
+            return Result<MembershipChangeResult>.Fail(ChatErrors.InviteInvalid);
         }
 
         if (chat.IsMember(callerId))
         {
-            return Result<ChatDto>.Ok(
-                await ChatQueries.EnrichAsync(chats, users, chat, callerId, ct).ConfigureAwait(false));
+            return Result<MembershipChangeResult>.Ok(new MembershipChangeResult(
+                await ChatQueries.EnrichAsync(chats, users, chat, callerId, ct).ConfigureAwait(false), null));
         }
 
         var role = chat.Type == ChatType.Channel ? ChatRole.Subscriber : ChatRole.Member;
         var added = chat.AddMember(callerId, role, clock.UtcNow);
         if (added.IsFailure)
         {
-            return Result<ChatDto>.Fail(added.Error);
+            return Result<MembershipChangeResult>.Fail(added.Error);
+        }
+
+        var noun = chat.Type == ChatType.Channel ? "channel" : "group";
+        var system = await AppendSystemMessageAsync(
+            chat, $"{self.DisplayName} joined the {noun}", callerId, ct).ConfigureAwait(false);
+        if (system.IsFailure)
+        {
+            return Result<MembershipChangeResult>.Fail(system.Error);
         }
 
         await chats.UpdateAsync(chat, ct).ConfigureAwait(false);
-        return Result<ChatDto>.Ok(
-            await ChatQueries.EnrichAsync(chats, users, chat, callerId, ct).ConfigureAwait(false));
+        return Result<MembershipChangeResult>.Ok(new MembershipChangeResult(
+            await ChatQueries.EnrichAsync(chats, users, chat, callerId, ct).ConfigureAwait(false),
+            system.Value!));
     }
 
     public async Task<Result<ChatDto>> SubscribeChannelAsync(
@@ -507,5 +557,40 @@ public sealed class GroupService(
         }
 
         return Result<(byte[] Bytes, string ContentType)>.Ok(loaded.Value);
+    }
+
+    /// <summary>
+    /// Records an English membership system message in history. The in-memory
+    /// chat projection is updated; persistence happens with the caller's own
+    /// <c>UpdateAsync</c> so membership + message commit in a single write.
+    /// <paramref name="actorId"/> resets that member's read watermark (everyone
+    /// else gets an unread bump, like regular messages).
+    /// </summary>
+    private async Task<Result<MessageDto>> AppendSystemMessageAsync(
+        Chat chat, string body, string actorId, CancellationToken ct)
+    {
+        var now = clock.UtcNow;
+        var seq = await chats.AllocateSeqAsync(chat.Id, now, ct).ConfigureAwait(false);
+        var created = Message.Create(
+            ids.NewId(), chat.Id, seq, $"sys-{ids.NewId()}", null,
+            MessageKind.System, body, null, null, now);
+        if (created.IsFailure)
+        {
+            return Result<MessageDto>.Fail(created.Error);
+        }
+
+        try
+        {
+            await messages.AddAsync(created.Value!, ct).ConfigureAwait(false);
+        }
+        catch (DuplicateMessageException)
+        {
+            return Result<MessageDto>.Fail(MessageErrors.ClientIdConflict);
+        }
+
+        chat.ApplyNewMessage(seq, created.Value!.Id, Message.PreviewOf(body), actorId, now);
+        return Result<MessageDto>.Ok(
+            await MessageQueries.EnrichAsync(messages, files, users, created.Value, ct, actorId)
+                .ConfigureAwait(false));
     }
 }

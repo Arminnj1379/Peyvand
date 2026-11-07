@@ -321,21 +321,21 @@ public sealed class MessagingHandlerTests
         var newcomer = await ctx.SeedUserAsync("mem.new");
         var chat = await SeedGroupAsync(ctx, owner, member);
 
-        var added = await new GroupService(ctx.Chats, ctx.Users, ctx.Avatars, ctx.Clock)
+        var added = await new GroupService(ctx.Chats, ctx.Users, ctx.Avatars, ctx.Messages, ctx.Files, ctx.Ids, ctx.Clock)
             .AddMemberAsync(new AddMemberCommand(chat.Id, newcomer.Id), ctx.As(owner), CancellationToken.None);
         Assert.True(added.IsSuccess);
-        Assert.Equal(3, added.Value!.MemberCount);
+        Assert.Equal(3, added.Value!.Chat.MemberCount);
 
-        var nonAdmin = await new GroupService(ctx.Chats, ctx.Users, ctx.Avatars, ctx.Clock)
+        var nonAdmin = await new GroupService(ctx.Chats, ctx.Users, ctx.Avatars, ctx.Messages, ctx.Files, ctx.Ids, ctx.Clock)
             .AddMemberAsync(new AddMemberCommand(chat.Id, newcomer.Id), ctx.As(member), CancellationToken.None);
         Assert.True(nonAdmin.IsFailure);
         Assert.Equal(ChatErrors.NotAdmin, nonAdmin.Error);
 
-        var promoted = await new GroupService(ctx.Chats, ctx.Users, ctx.Avatars, ctx.Clock)
+        var promoted = await new GroupService(ctx.Chats, ctx.Users, ctx.Avatars, ctx.Messages, ctx.Files, ctx.Ids, ctx.Clock)
             .SetMemberRoleAsync(new SetMemberRoleCommand(chat.Id, member.Id, "Admin"), ctx.As(owner), CancellationToken.None);
         Assert.True(promoted.IsSuccess);
 
-        var left = await new GroupService(ctx.Chats, ctx.Users, ctx.Avatars, ctx.Clock)
+        var left = await new GroupService(ctx.Chats, ctx.Users, ctx.Avatars, ctx.Messages, ctx.Files, ctx.Ids, ctx.Clock)
             .LeaveChatAsync(new LeaveChatCommand(chat.Id), ctx.As(newcomer), CancellationToken.None);
         Assert.True(left.IsSuccess);
     }
