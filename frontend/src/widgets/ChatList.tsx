@@ -7,7 +7,6 @@ import type { Chat } from '../features/chats/chatTypes';
 import { isAdmin } from '../features/auth/authTypes';
 import { useAuthStore } from '../features/auth/authStore';
 import { formatConversationTime } from '../features/messages/messageTypes';
-import { Avatar } from '../shared/ui/Avatar';
 import { UserAvatar } from '../shared/ui/UserAvatar';
 import { useUserQuery } from '../features/auth/useUser';
 import { Icon } from '../shared/ui/Icon';
@@ -150,6 +149,10 @@ export function ChatList({
   const logout = useAuthStore((s) => s.logout);
   const queryClient = useQueryClient();
   const label = user?.displayName ?? '…';
+  // Own photo for the header account button (shared profile cache with
+  // conversation rows; the store copy covers first paint).
+  const selfProfile = useUserQuery(myUserId);
+  const selfAvatarUrl = selfProfile.data?.avatarUrl ?? user?.avatarUrl ?? null;
 
   const visible = chats.filter((c) => {
     const name = chatDisplayName(c, myUserId);
@@ -254,7 +257,7 @@ export function ChatList({
           aria-label="Account menu"
           title={label}
         >
-          <Avatar name={label} color="#8774e1" size={38} />
+          <UserAvatar avatarUrl={selfAvatarUrl} name={label} color="#8774e1" size={38} />
         </button>
         {menuOpen ? (
           <div className="profile-menu top" role="menu">

@@ -72,6 +72,7 @@ export function ProfilePage() {
       const u = await authApi.uploadAvatar(file);
       setUser(u);
       setAvatarBust((n) => n + 1);
+      await queryClient.invalidateQueries({ queryKey: ['user', u.id] });
     } catch (e) {
       setAvatarMsg(e instanceof ApiError ? e.message : 'Upload failed.');
     }
@@ -82,6 +83,7 @@ export function ProfilePage() {
       const u = await authApi.removeAvatar();
       setUser(u);
       setAvatarBust((n) => n + 1);
+      await queryClient.invalidateQueries({ queryKey: ['user', u.id] });
     } catch (e) {
       setAvatarMsg(e instanceof ApiError ? e.message : 'Remove failed.');
     }
