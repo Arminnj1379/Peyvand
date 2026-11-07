@@ -272,6 +272,7 @@ export function MessengerPage() {
         </main>
       ) : active ? (
         <ChatWindow
+          key={active.id}
           chat={active}
           chats={chats}
           myUserId={myUserId}

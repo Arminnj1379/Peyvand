@@ -55,6 +55,14 @@
   --shadow-sm: 0 1px 2px rgb(16 24 40 / 0.1), 0 4px 16px rgb(16 24 40 / 0.12);
   --shadow-lg: 0 4px 8px rgb(0 0 0 / 0.25), 0 16px 40px rgb(0 0 0 / 0.35);
 
+  /* Motion system: micro 120–180 · overlays 150–220 · dialogs 180–250 · layout 200–300.
+     Transform/opacity only; entrances use ease-out. */
+  --ease-out: cubic-bezier(0.2, 0.7, 0.3, 1);
+  --dur-micro: 150ms;
+  --dur-overlay: 200ms;
+  --dur-dialog: 220ms;
+  --dur-layout: 260ms;
+
   --font: 'Vazirmatn', 'Inter', -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
   color-scheme: light;
 
@@ -708,11 +716,10 @@ button.bubble-reply:hover { filter: brightness(0.97); }
 .typing-dots { display: inline-flex; gap: 3px; }
 .typing-dots i {
   width: 5px; height: 5px; border-radius: 50%; background: var(--text-tertiary);
-  animation: typing-blink 1.2s ease-in-out infinite;
+  animation: typing-wave 1.2s ease-in-out infinite;
 }
 .typing-dots i:nth-child(2) { animation-delay: 0.15s; }
 .typing-dots i:nth-child(3) { animation-delay: 0.3s; }
-@keyframes typing-blink { 0%, 100% { opacity: 0.35; } 50% { opacity: 1; } }
 
 /* Floating "scroll to bottom" button with unread badge. */
 .scroll-fab {
@@ -1589,6 +1596,184 @@ button.chip:hover { filter: brightness(0.96); }
   text-transform: uppercase; letter-spacing: 0.05em; border-top: 0; white-space: nowrap;
 }
 .table tbody tr:hover { background: var(--hover); }
+
+/* ── Motion system (CSS-only; transform/opacity, ease-out entrances) ──
+   Micro 120–180ms · overlays 150–220ms · dialogs 180–250ms · layout 200–300ms.
+   Only the newest message animates (`.msg-new`); the list itself never does,
+   so long histories and SignalR patches stay cheap. Exit animations are
+   intentionally absent: mounts are conditional with no JS exit phase. */
+
+@keyframes msg-in {
+  from { opacity: 0; transform: translateY(8px) scale(0.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+@keyframes chat-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes panel-in {
+  from { opacity: 0; transform: translateX(14px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+@keyframes menu-in {
+  from { opacity: 0; transform: scale(0.96) translateY(-4px); }
+  to { opacity: 1; transform: scale(1) translateY(0); }
+}
+@keyframes dialog-in {
+  from { opacity: 0; transform: scale(0.96) translateY(8px); }
+  to { opacity: 1; transform: scale(1) translateY(0); }
+}
+@keyframes backdrop-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes toast-in {
+  from { opacity: 0; transform: translateY(10px) scale(0.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+@keyframes fab-in {
+  from { opacity: 0; transform: scale(0.7); }
+  to { opacity: 1; transform: scale(1); }
+}
+@keyframes react-pop {
+  0% { opacity: 0; transform: scale(0.6); }
+  60% { opacity: 1; transform: scale(1.12); }
+  100% { opacity: 1; transform: scale(1); }
+}
+@keyframes typing-wave {
+  0%, 100% { opacity: 0.35; transform: translateY(0); }
+  50% { opacity: 1; transform: translateY(-3px); }
+}
+@keyframes bar-in {
+  from { opacity: 0; transform: translateY(-6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes empty-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes skeleton-shimmer {
+  from { background-position: 100% 0; }
+  to { background-position: -100% 0; }
+}
+
+/* Newest message only — sent or received. */
+.bubble-row.msg-new .bubble { animation: msg-in var(--dur-layout) var(--ease-out) both; }
+.system-divider.msg-new { animation: msg-in var(--dur-layout) var(--ease-out) both; }
+
+/* Conversation switching: ChatWindow remounts per chat (key={chat.id}). */
+.chat-area { animation: chat-in var(--dur-layout) var(--ease-out); }
+/* Mobile list ↔ chat is a view swap, not a slide — keep the same subtle fade. */
+@media (max-width: 767px) {
+  .shell.chat-open .chat-area { animation: chat-in var(--dur-overlay) var(--ease-out); }
+}
+
+/* Side panels slide in on mount. */
+.details-panel { animation: panel-in var(--dur-layout) var(--ease-out); }
+[dir='rtl'] .details-panel { animation-name: panel-in-rtl; }
+@keyframes panel-in-rtl {
+  from { opacity: 0; transform: translateX(-14px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+.thread-drawer { animation: panel-in var(--dur-layout) var(--ease-out); }
+[dir='rtl'] .thread-drawer { animation-name: panel-in-rtl; }
+
+/* Overlays: fade the backdrop, pop the surface. */
+.menu-backdrop { animation: backdrop-in var(--dur-micro) ease-out; }
+.context-menu, .bell-menu, .emoji-pop { animation: menu-in var(--dur-overlay) var(--ease-out); transform-origin: top center; }
+.context-menu { transform-origin: top left; }
+.dialog-backdrop { animation: backdrop-in var(--dur-micro) ease-out; }
+.dialog { animation: dialog-in var(--dur-dialog) var(--ease-out); }
+.viewer-backdrop { animation: backdrop-in var(--dur-micro) ease-out; }
+.viewer-image { animation: dialog-in var(--dur-dialog) var(--ease-out); }
+.call-incoming { animation: dialog-in var(--dur-dialog) var(--ease-out), call-ring 1.6s ease-in-out 0.3s infinite; }
+.call-overlay { animation: backdrop-in var(--dur-overlay) ease-out; }
+
+/* Toasts stack entrance. */
+.toast { animation: toast-in var(--dur-overlay) var(--ease-out); }
+
+/* Floating action buttons. */
+.scroll-fab { animation: fab-in 180ms var(--ease-out); }
+.new-chat-fab { transition: background-color 180ms ease, filter 180ms ease, transform 180ms var(--ease-out); }
+.new-chat-fab:active { transform: scale(0.92); }
+
+/* Reactions pop only for newly mounted chips (React reuses nodes on count change). */
+.reaction-chip { animation: react-pop 180ms var(--ease-out); }
+.quick-emoji { transition: background-color var(--dur-micro) ease, transform var(--dur-micro) var(--ease-out); }
+.quick-emoji:hover { transform: scale(1.18); }
+.quick-emoji:active { transform: scale(0.95); }
+
+/* Typing wave keyframes live with the typing styles; delays are set there too. */
+
+/* Inline bars / alerts slide down on mount. */
+.reply-bar, .selection-bar, .pin-bar, .action-error, .call-error, .attach-bar, .voice-bar {
+  animation: bar-in var(--dur-overlay) var(--ease-out);
+}
+.form-error { animation: bar-in var(--dur-overlay) var(--ease-out); }
+
+/* Empty states fade up once. */
+.empty-state, .empty-chats { animation: empty-in var(--dur-layout) var(--ease-out); }
+
+/* Press feedback (transform-only, within the micro budget). */
+.icon-btn:active { transform: scale(0.88); }
+.send-btn:active:not(:disabled) { transform: scale(0.92); }
+.primary-btn:active:not(:disabled), .ghost-btn:active:not(:disabled) { transform: scale(0.97); }
+.folder-tab:active { transform: scale(0.96); }
+.conversation-item:active { transform: scale(0.995); }
+.tg-playbtn:active:not(:disabled) { transform: scale(0.92); }
+.tg-video-play:active { transform: scale(0.94); }
+
+/* Tabs: color transition exists; add a growing underline for the active tab. */
+.folder-tab { position: relative; transition: background-color 180ms ease, color 180ms ease, transform 120ms var(--ease-out); overflow: hidden; }
+.folder-tab::after {
+  content: ''; position: absolute; left: 10px; right: 10px; bottom: 0; height: 2px;
+  border-radius: 2px; background: var(--brand);
+  transform: scaleX(0); transform-origin: center;
+  transition: transform 200ms var(--ease-out);
+}
+.folder-tab.active::after { transform: scaleX(1); }
+
+/* Toggles / checkboxes ease. */
+.check input, .select-box, .field.check input, label.check input {
+  transition: transform var(--dur-micro) var(--ease-out), accent-color var(--dur-micro) ease;
+}
+.member-row select, .member-actions select { transition: border-color var(--dur-micro) ease, background-color var(--dur-micro) ease; }
+
+/* Skeleton loading (transform-free shimmer; respects reduced-motion below). */
+.skeleton-list { display: flex; flex-direction: column; gap: 10px; padding: 12px 0; }
+.skeleton-row { display: flex; gap: 10px; align-items: flex-end; }
+.skeleton-row.mine { justify-content: flex-end; }
+.skeleton-bubble {
+  width: min(62%, 320px); height: 52px; border-radius: 16px;
+  background: linear-gradient(100deg, var(--hover) 30%, var(--divider) 50%, var(--hover) 70%);
+  background-size: 200% 100%;
+  animation: skeleton-shimmer 1.4s linear infinite;
+}
+.skeleton-avatar {
+  width: 36px; height: 36px; border-radius: 50%; flex-shrink: 0;
+  background: linear-gradient(100deg, var(--hover) 30%, var(--divider) 50%, var(--hover) 70%);
+  background-size: 200% 100%;
+  animation: skeleton-shimmer 1.4s linear infinite;
+}
+.loading-line { animation: empty-in var(--dur-overlay) ease-out; }
+
+/* Voice: icon crossfade on play/pause + already-smooth waveform. */
+.tg-playbtn svg { transition: transform var(--dur-micro) var(--ease-out), opacity var(--dur-micro) ease; }
+.tg-playbtn:not(:disabled):hover svg { transform: scale(1.08); }
+.voice-live i:not(.live-idle) { transition: height 120ms linear; }
+
+@media (prefers-reduced-motion: reduce) {
+  .bubble-row.msg-new .bubble, .system-divider.msg-new, .chat-area,
+  .details-panel, .thread-drawer, .context-menu, .bell-menu, .emoji-pop,
+  .dialog, .viewer-image, .call-incoming, .call-overlay,
+  .menu-backdrop, .dialog-backdrop, .viewer-backdrop,
+  .toast, .scroll-fab, .reaction-chip,
+  .reply-bar, .selection-bar, .pin-bar, .action-error, .call-error, .attach-bar, .voice-bar,
+  .form-error, .empty-state, .empty-chats, .loading-line { animation: none; }
+  .quick-emoji:hover { transform: none; }
+  .skeleton-bubble, .skeleton-avatar { animation: none; }
+  .typing-dots i { animation-duration: 0.01ms; }
+}
 
 /* ── Scrollbars (thin, dark, subtle) ───────────────────────── */
 

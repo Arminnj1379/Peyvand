@@ -825,7 +825,13 @@ export function ChatWindow({
           </div>
         ) : null}
         {history.isPending ? (
-          <EmptyState title={t('chat.loadingMessages')} hint={t('chat.fetchingHistory')} />
+          <div className="skeleton-list" role="status" aria-label={t('chat.loadingMessages')}>
+            <span className="visually-hidden">{t('chat.loadingMessages')}</span>
+            <div className="skeleton-row theirs" aria-hidden="true"><span className="skeleton-bubble" /></div>
+            <div className="skeleton-row mine" aria-hidden="true"><span className="skeleton-bubble" /></div>
+            <div className="skeleton-row theirs" aria-hidden="true"><span className="skeleton-bubble" /></div>
+            <div className="skeleton-row mine" aria-hidden="true"><span className="skeleton-bubble" /></div>
+          </div>
         ) : null}
         {history.isError ? (
           <div className="history-error">
@@ -859,7 +865,7 @@ export function ChatWindow({
             return (
               <Fragment key={m.id}>
                 {showDay ? <div className="day-divider" role="separator" aria-label={formatDayLabel(m.createdAt)}>{formatDayLabel(m.createdAt)}</div> : null}
-                <div className="system-divider" role="note"><span dir="auto">{m.body}</span></div>
+                <div className={`system-divider${i === flat.length - 1 ? ' msg-new' : ''}`} role="note"><span dir="auto">{m.body}</span></div>
               </Fragment>
             );
           }
@@ -919,7 +925,7 @@ export function ChatWindow({
           return (
             <Fragment key={m.id}>
               {showDay ? <div className="day-divider" role="separator" aria-label={formatDayLabel(m.createdAt)}>{formatDayLabel(m.createdAt)}</div> : null}
-              <div id={`msg-${m.id}`} className={`bubble-row${mine ? ' mine' : ' theirs'}${grouped ? ' grouped' : ''}`}>
+              <div id={`msg-${m.id}`} className={`bubble-row${mine ? ' mine' : ' theirs'}${grouped ? ' grouped' : ''}${i === flat.length - 1 ? ' msg-new' : ''}`}>
                 {selecting ? (
                   <input
                     type="checkbox"

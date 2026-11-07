@@ -408,7 +408,15 @@ export function ChatList({
 
       <div className="conversation-list" role="listbox" aria-label={t('sidebar.conversationList')}>
         {isLoading ? (
-          <p className="loading-line">{t('common.loading')}</p>
+          <div className="skeleton-list" role="status" aria-label={t('common.loading')}>
+            <span className="visually-hidden">{t('common.loading')}</span>
+            {[0, 1, 2, 3, 4].map((i) => (
+              <div className="skeleton-row" key={i} aria-hidden="true">
+                <span className="skeleton-avatar" />
+                <span className="skeleton-bubble" />
+              </div>
+            ))}
+          </div>
         ) : null}
         {!isLoading && visible.length === 0 ? (
           <div className="empty-chats">
