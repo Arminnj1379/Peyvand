@@ -56,12 +56,20 @@
   --shadow-lg: 0 4px 8px rgb(0 0 0 / 0.25), 0 16px 40px rgb(0 0 0 / 0.35);
 
   /* Motion system: micro 120–180 · overlays 150–220 · dialogs 180–250 · layout 200–300.
-     Transform/opacity only; entrances use ease-out. */
+     Transform/opacity only; entrances use ease-out, exits are shorter.
+     Spring is restrained (no bounce): overshoot stays ≤ 4%. */
   --ease-out: cubic-bezier(0.2, 0.7, 0.3, 1);
+  --ease-spring: cubic-bezier(0.34, 1.25, 0.4, 1);
+  --ease-snappy: cubic-bezier(0.3, 0.9, 0.25, 1);
+  --ease-in: cubic-bezier(0.4, 0, 0.6, 1);
+  --dur-instant: 100ms;
   --dur-micro: 150ms;
   --dur-overlay: 200ms;
   --dur-dialog: 220ms;
   --dur-layout: 260ms;
+  --dur-slow: 340ms;
+  --stagger-step: 32ms;
+  --stagger-cap: 8;
 
   --font: 'Vazirmatn', 'Inter', -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
   color-scheme: light;
@@ -1080,7 +1088,7 @@ button.bubble-reply:hover { filter: brightness(0.97); }
 }
 .tg-playbtn:hover { filter: brightness(1.12); }
 .tg-playbtn:active { transform: scale(0.95); }
-.tg-playbtn.sm { width: 40px; height: 40px; }
+.tg-playbtn.sm { width: 42px; height: 42px; }
 .bubble-row.mine .tg-playbtn { background: #fff; color: #6a5ee0; }
 
 /* Music: round button + title + thin seek bar with knob + time. */
@@ -1110,26 +1118,38 @@ button.bubble-reply:hover { filter: brightness(0.97); }
 [dir='rtl'] .music-bar-knob { transform: translate(50%, -50%); }
 .music-time { font-size: 11.5px; opacity: 0.7; font-variant-numeric: tabular-nums; }
 
-/* Voice: play button + waveform + duration (lives on the bubble itself). */
+/* Voice: 42px play button + compact waveform + single clock (Telegram). */
 .voice-player {
   display: flex; align-items: center; gap: 10px;
-  min-width: min(220px, 100%); max-width: 300px; padding: 2px;
+  min-width: min(188px, 100%); max-width: min(280px, 100%); width: max-content;
+  padding: 2px;
 }
-.voice-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.voice-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .voice-bars {
-  display: flex; align-items: center; gap: 2px;
-  height: 26px; cursor: pointer; touch-action: none;
+  display: flex; align-items: center; gap: 2px; flex: 1; min-width: 0;
+  height: 32px; padding: 0 2px; cursor: pointer; touch-action: none;
   border-radius: 6px;
 }
 .voice-bars:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
-.voice-bars i { width: 3px; border-radius: 2px; background: currentColor; opacity: 0.32; min-height: 4px; transition: opacity 160ms ease; }
-.voice-bars i.on { opacity: 1; }
-.voice-time {
-  display: flex; align-items: center; gap: 6px;
-  font-size: 11.5px; opacity: 0.75; font-variant-numeric: tabular-nums;
+.voice-bars:hover i:not(.on) { opacity: 0.5; }
+.voice-bars i {
+  width: 2px; border-radius: 2px; background: currentColor;
+  opacity: 0.32; min-height: 4px; max-height: 24px; flex-shrink: 0;
 }
-.voice-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--brand); flex-shrink: 0; }
-.bubble-row.mine .voice-dot { background: #fff; }
+.voice-bars i.on { opacity: 1; background: var(--brand); }
+/* Outgoing: white bars on brand bubble (dark), brand-strong on light bubble. */
+.bubble-row.mine .voice-bars i { background: #fff; opacity: 0.45; }
+.bubble-row.mine .voice-bars i.on { background: #fff; opacity: 1; }
+:root[data-theme='light'] .bubble-row.mine .voice-bars i { background: var(--brand-strong); opacity: 0.28; }
+:root[data-theme='light'] .bubble-row.mine .voice-bars i.on { background: var(--brand-strong); opacity: 1; }
+.voice-player .voice-time {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 12px; line-height: 1.25; opacity: 0.78; font-variant-numeric: tabular-nums;
+}
+.voice-player .voice-time-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.voice-unplayed { width: 8px; height: 8px; border-radius: 50%; background: var(--brand); flex-shrink: 0; }
+.bubble-row.mine .voice-unplayed { background: #fff; }
+:root[data-theme='light'] .bubble-row.mine .voice-unplayed { background: var(--brand-strong); }
 .voice-errmsg { font-size: 12px; color: var(--danger); }
 .voice-error .tg-playbtn { background: transparent; border: 1px solid var(--divider); color: var(--text-secondary); }
 .voice-error .tg-playbtn:hover { filter: none; background: var(--hover); }
@@ -1597,113 +1617,208 @@ button.chip:hover { filter: brightness(0.96); }
 }
 .table tbody tr:hover { background: var(--hover); }
 
-/* ── Motion system (CSS-only; transform/opacity, ease-out entrances) ──
+/* ── Motion system (CSS-only; transform/opacity, spring-restrained) ──
    Micro 120–180ms · overlays 150–220ms · dialogs 180–250ms · layout 200–300ms.
-   Only the newest message animates (`.msg-new`); the list itself never does,
-   so long histories and SignalR patches stay cheap. Exit animations are
-   intentionally absent: mounts are conditional with no JS exit phase. */
+   Stagger is capped (≤8 items × 32ms) and only applies to the initial tail of
+   a freshly opened chat; live SignalR arrivals animate the single newest node.
+   Exits play via `.leaving` (JS keeps the node for ~150–180ms); without JS
+   the node simply unmounts. All keyframes are transform/opacity only. */
 
 @keyframes msg-in {
-  from { opacity: 0; transform: translateY(8px) scale(0.98); }
+  from { opacity: 0; transform: translateY(10px) scale(0.97); }
   to { opacity: 1; transform: translateY(0) scale(1); }
 }
-@keyframes chat-in {
+@keyframes msg-stagger-in {
+  from { opacity: 0; transform: translateY(12px) scale(0.97); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+@keyframes conv-in {
   from { opacity: 0; transform: translateY(6px); }
   to { opacity: 1; transform: translateY(0); }
 }
-@keyframes panel-in {
-  from { opacity: 0; transform: translateX(14px); }
+@keyframes chat-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes chat-slide-in {
+  from { opacity: 0; transform: translateX(24px); }
   to { opacity: 1; transform: translateX(0); }
 }
+@keyframes panel-in {
+  from { opacity: 0; transform: translateX(18px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+@keyframes panel-out {
+  from { opacity: 1; transform: translateX(0); }
+  to { opacity: 0; transform: translateX(18px); }
+}
 @keyframes menu-in {
-  from { opacity: 0; transform: scale(0.96) translateY(-4px); }
+  from { opacity: 0; transform: scale(0.95) translateY(-5px); }
   to { opacity: 1; transform: scale(1) translateY(0); }
 }
+@keyframes menu-out {
+  from { opacity: 1; transform: scale(1) translateY(0); }
+  to { opacity: 0; transform: scale(0.96) translateY(-3px); }
+}
 @keyframes dialog-in {
-  from { opacity: 0; transform: scale(0.96) translateY(8px); }
+  from { opacity: 0; transform: scale(0.95) translateY(10px); }
   to { opacity: 1; transform: scale(1) translateY(0); }
+}
+@keyframes dialog-out {
+  from { opacity: 1; transform: scale(1) translateY(0); }
+  to { opacity: 0; transform: scale(0.96) translateY(6px); }
 }
 @keyframes backdrop-in {
   from { opacity: 0; }
   to { opacity: 1; }
 }
+@keyframes backdrop-out {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
 @keyframes toast-in {
-  from { opacity: 0; transform: translateY(10px) scale(0.98); }
+  from { opacity: 0; transform: translateY(12px) scale(0.97); }
   to { opacity: 1; transform: translateY(0) scale(1); }
 }
+@keyframes toast-out {
+  from { opacity: 1; transform: translateY(0) scale(1); }
+  to { opacity: 0; transform: translateY(8px) scale(0.98); }
+}
 @keyframes fab-in {
-  from { opacity: 0; transform: scale(0.7); }
-  to { opacity: 1; transform: scale(1); }
+  from { opacity: 0; transform: scale(0.6) translateY(6px); }
+  to { opacity: 1; transform: scale(1) translateY(0); }
 }
 @keyframes react-pop {
-  0% { opacity: 0; transform: scale(0.6); }
-  60% { opacity: 1; transform: scale(1.12); }
+  0% { opacity: 0; transform: scale(0.55); }
+  55% { opacity: 1; transform: scale(1.14); }
+  100% { opacity: 1; transform: scale(1); }
+}
+@keyframes badge-pop {
+  0% { opacity: 0; transform: scale(0.5); }
+  60% { opacity: 1; transform: scale(1.18); }
   100% { opacity: 1; transform: scale(1); }
 }
 @keyframes typing-wave {
-  0%, 100% { opacity: 0.35; transform: translateY(0); }
-  50% { opacity: 1; transform: translateY(-3px); }
+  0%, 100% { opacity: 0.35; transform: translateY(0) scale(1); }
+  50% { opacity: 1; transform: translateY(-3px) scale(1.08); }
 }
 @keyframes bar-in {
-  from { opacity: 0; transform: translateY(-6px); }
+  from { opacity: 0; transform: translateY(-8px); }
   to { opacity: 1; transform: translateY(0); }
 }
 @keyframes empty-in {
-  from { opacity: 0; transform: translateY(6px); }
-  to { opacity: 1; transform: translateY(0); }
+  from { opacity: 0; transform: translateY(8px) scale(0.99); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
 }
 @keyframes skeleton-shimmer {
   from { background-position: 100% 0; }
   to { background-position: -100% 0; }
 }
+@keyframes flash-pulse {
+  0% { box-shadow: 0 0 0 0 rgb(135 116 225 / 0.55); }
+  100% { box-shadow: 0 0 0 12px rgb(135 116 225 / 0); }
+}
+@keyframes viewer-zoom {
+  from { opacity: 0; transform: scale(0.92); }
+  to { opacity: 1; transform: scale(1); }
+}
+@keyframes upload-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.55; }
+}
 
-/* Newest message only — sent or received. */
-.bubble-row.msg-new .bubble { animation: msg-in var(--dur-layout) var(--ease-out) both; }
-.system-divider.msg-new { animation: msg-in var(--dur-layout) var(--ease-out) both; }
+/* Newest message only — sent or received. Live arrivals (SignalR + optimistic). */
+.bubble-row.msg-new .bubble { animation: msg-in var(--dur-layout) var(--ease-spring) both; }
+.system-divider.msg-new { animation: msg-in var(--dur-layout) var(--ease-spring) both; }
+/* Initial tail stagger on chat open: last ≤8 rows cascade, capped at ~250ms total. */
+.bubble-row.msg-stagger .bubble { animation: msg-stagger-in var(--dur-layout) var(--ease-out) both; animation-delay: calc(var(--stagger-i, 0) * var(--stagger-step)); }
+.system-divider.msg-stagger { animation: msg-stagger-in var(--dur-layout) var(--ease-out) both; animation-delay: calc(var(--stagger-i, 0) * var(--stagger-step)); }
 
 /* Conversation switching: ChatWindow remounts per chat (key={chat.id}). */
 .chat-area { animation: chat-in var(--dur-layout) var(--ease-out); }
-/* Mobile list ↔ chat is a view swap, not a slide — keep the same subtle fade. */
+/* Mobile list ↔ chat slides from the content edge (direction-aware). */
 @media (max-width: 767px) {
-  .shell.chat-open .chat-area { animation: chat-in var(--dur-overlay) var(--ease-out); }
+  .shell.chat-open .chat-area { animation: chat-slide-in var(--dur-layout) var(--ease-out); }
+  [dir='rtl'] .shell.chat-open .chat-area { animation-name: chat-slide-in-rtl; }
 }
-
-/* Side panels slide in on mount. */
-.details-panel { animation: panel-in var(--dur-layout) var(--ease-out); }
-[dir='rtl'] .details-panel { animation-name: panel-in-rtl; }
-@keyframes panel-in-rtl {
-  from { opacity: 0; transform: translateX(-14px); }
+@keyframes chat-slide-in-rtl {
+  from { opacity: 0; transform: translateX(-24px); }
   to { opacity: 1; transform: translateX(0); }
 }
-.thread-drawer { animation: panel-in var(--dur-layout) var(--ease-out); }
-[dir='rtl'] .thread-drawer { animation-name: panel-in-rtl; }
 
-/* Overlays: fade the backdrop, pop the surface. */
+/* Conversation rows cascade on filter/search change (capped, cheap). */
+.conversation-item.conv-enter { animation: conv-in var(--dur-overlay) var(--ease-out) both; animation-delay: calc(min(var(--stagger-i, 0), 7) * 28ms); }
+
+/* Side panels slide in on mount, slide out via `.leaving`. */
+.details-panel { animation: panel-in var(--dur-layout) var(--ease-out); }
+.details-panel.leaving { animation: panel-out 180ms var(--ease-in) both; }
+[dir='rtl'] .details-panel { animation-name: panel-in-rtl; }
+[dir='rtl'] .details-panel.leaving { animation-name: panel-out-rtl; }
+@keyframes panel-in-rtl {
+  from { opacity: 0; transform: translateX(-18px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+@keyframes panel-out-rtl {
+  from { opacity: 1; transform: translateX(0); }
+  to { opacity: 0; transform: translateX(-18px); }
+}
+.thread-drawer { animation: panel-in var(--dur-layout) var(--ease-out); }
+.thread-drawer.leaving { animation: panel-out 180ms var(--ease-in) both; }
+[dir='rtl'] .thread-drawer { animation-name: panel-in-rtl; }
+[dir='rtl'] .thread-drawer.leaving { animation-name: panel-out-rtl; }
+
+/* Overlays: fade the backdrop, spring the surface. Exits are shorter. */
 .menu-backdrop { animation: backdrop-in var(--dur-micro) ease-out; }
-.context-menu, .bell-menu, .emoji-pop { animation: menu-in var(--dur-overlay) var(--ease-out); transform-origin: top center; }
+.menu-backdrop.leaving { animation: backdrop-out 140ms ease-in both; }
+.context-menu, .bell-menu, .emoji-pop, .profile-menu { animation: menu-in var(--dur-overlay) var(--ease-spring); transform-origin: top center; }
+.context-menu.leaving, .bell-menu.leaving, .emoji-pop.leaving, .profile-menu.leaving { animation: menu-out 150ms var(--ease-in) both; }
 .context-menu { transform-origin: top left; }
+/* Context-menu items cascade (first paint only; hover stays instant). */
+.context-menu button, .bell-menu .picker-row { animation: conv-in 160ms var(--ease-out) both; }
+.context-menu button:nth-child(2) { animation-delay: 18ms; }
+.context-menu button:nth-child(3) { animation-delay: 36ms; }
+.context-menu button:nth-child(4) { animation-delay: 54ms; }
 .dialog-backdrop { animation: backdrop-in var(--dur-micro) ease-out; }
-.dialog { animation: dialog-in var(--dur-dialog) var(--ease-out); }
+.dialog-backdrop.leaving { animation: backdrop-out 160ms ease-in both; }
+.dialog { animation: dialog-in var(--dur-dialog) var(--ease-spring); }
+.dialog-backdrop.leaving .dialog { animation: dialog-out 160ms var(--ease-in) both; }
 .viewer-backdrop { animation: backdrop-in var(--dur-micro) ease-out; }
-.viewer-image { animation: dialog-in var(--dur-dialog) var(--ease-out); }
+.viewer-backdrop.leaving { animation: backdrop-out 160ms ease-in both; }
+.viewer-image { animation: viewer-zoom var(--dur-dialog) var(--ease-out); }
+.viewer-backdrop.leaving .viewer-image { animation: dialog-out 160ms var(--ease-in) both; }
 .call-incoming { animation: dialog-in var(--dur-dialog) var(--ease-out), call-ring 1.6s ease-in-out 0.3s infinite; }
 .call-overlay { animation: backdrop-in var(--dur-overlay) ease-out; }
 
-/* Toasts stack entrance. */
-.toast { animation: toast-in var(--dur-overlay) var(--ease-out); }
+/* Toasts: spring in, slide-fade out, badge pops on count change. */
+.toast { animation: toast-in var(--dur-overlay) var(--ease-spring); }
+.toast.leaving { animation: toast-out 180ms var(--ease-in) both; }
 
 /* Floating action buttons. */
-.scroll-fab { animation: fab-in 180ms var(--ease-out); }
-.new-chat-fab { transition: background-color 180ms ease, filter 180ms ease, transform 180ms var(--ease-out); }
-.new-chat-fab:active { transform: scale(0.92); }
+.scroll-fab { animation: fab-in 200ms var(--ease-spring); }
+.scroll-fab .scroll-count { animation: badge-pop 220ms var(--ease-spring); }
+.new-chat-fab { transition: background-color 180ms ease, filter 180ms ease, transform 200ms var(--ease-spring); }
+.new-chat-fab:hover { transform: scale(1.06); }
+.new-chat-fab:active { transform: scale(0.9); }
 
-/* Reactions pop only for newly mounted chips (React reuses nodes on count change). */
-.reaction-chip { animation: react-pop 180ms var(--ease-out); }
-.quick-emoji { transition: background-color var(--dur-micro) ease, transform var(--dur-micro) var(--ease-out); }
-.quick-emoji:hover { transform: scale(1.18); }
-.quick-emoji:active { transform: scale(0.95); }
+/* Unread badges pop when the count node remounts (key={count}). */
+.unread-badge, .bell-badge { animation: badge-pop 220ms var(--ease-spring); }
+.folder-count { transition: background-color 180ms ease, color 180ms ease, transform 180ms var(--ease-spring); }
 
-/* Typing wave keyframes live with the typing styles; delays are set there too. */
+/* Reactions pop on mount and on count change (key includes count). */
+.reaction-chip { animation: react-pop 200ms var(--ease-spring); transition: border-color 150ms ease, background-color 150ms ease, transform 150ms var(--ease-spring); }
+.reaction-chip:hover:not(:disabled) { transform: translateY(-1px) scale(1.04); }
+.reaction-chip:active:not(:disabled) { transform: scale(0.93); }
+.quick-emoji { transition: background-color var(--dur-micro) ease, transform 160ms var(--ease-spring); }
+.quick-emoji:hover { transform: scale(1.22); }
+.quick-emoji:active { transform: scale(0.9); }
+
+/* Typing lives in a soft bubble so the row doesn't jump; dots wave. */
+.typing-row { animation: bar-in var(--dur-overlay) var(--ease-out); }
+.typing-bubble {
+  display: inline-flex; align-items: center; gap: 8px;
+  background: var(--bubble-in); border-radius: 16px; border-bottom-left-radius: 6px;
+  padding: 10px 14px; box-shadow: 0 1px 1px rgb(0 0 0 / 0.25);
+}
 
 /* Inline bars / alerts slide down on mount. */
 .reply-bar, .selection-bar, .pin-bar, .action-error, .call-error, .attach-bar, .voice-bar {
@@ -1711,33 +1826,46 @@ button.chip:hover { filter: brightness(0.96); }
 }
 .form-error { animation: bar-in var(--dur-overlay) var(--ease-out); }
 
+/* Landing highlight after reply navigation: ring pulse, no layout shift. */
+.bubble.flash { outline: 2px solid var(--brand); outline-offset: 1px; animation: flash-pulse 900ms ease-out 2; }
+
 /* Empty states fade up once. */
 .empty-state, .empty-chats { animation: empty-in var(--dur-layout) var(--ease-out); }
 
-/* Press feedback (transform-only, within the micro budget). */
-.icon-btn:active { transform: scale(0.88); }
-.send-btn:active:not(:disabled) { transform: scale(0.92); }
+/* Press feedback (transform-only, spring-restrained). */
+.icon-btn { transition: background-color 160ms ease, color 160ms ease, transform 160ms var(--ease-spring); }
+.icon-btn:hover { transform: translateY(-1px); }
+.icon-btn:active { transform: scale(0.86); }
+.send-btn { transition: filter 160ms ease, transform 180ms var(--ease-spring), background-color 180ms ease; }
+.send-btn:hover:not(:disabled) { transform: translateY(-1px) scale(1.04); }
+.send-btn:active:not(:disabled) { transform: scale(0.9); }
+.primary-btn, .ghost-btn { transition: background-color 160ms ease, border-color 160ms ease, transform 160ms var(--ease-spring), box-shadow 160ms ease; }
+.primary-btn:hover:not(:disabled), .ghost-btn:hover:not(:disabled) { transform: translateY(-1px); }
 .primary-btn:active:not(:disabled), .ghost-btn:active:not(:disabled) { transform: scale(0.97); }
 .folder-tab:active { transform: scale(0.96); }
-.conversation-item:active { transform: scale(0.995); }
-.tg-playbtn:active:not(:disabled) { transform: scale(0.92); }
-.tg-video-play:active { transform: scale(0.94); }
+.conversation-item { transition: background-color 160ms ease, transform 160ms var(--ease-spring); }
+.conversation-item:hover { transform: translateX(0); }
+.conversation-item:active { transform: scale(0.988); }
+.tg-playbtn { transition: filter 150ms ease, transform 180ms var(--ease-spring); }
+.tg-playbtn:hover:not(:disabled) { transform: scale(1.06); }
+.tg-playbtn:active:not(:disabled) { transform: scale(0.9); }
+.tg-video-play:active { transform: scale(0.92); }
 
-/* Tabs: color transition exists; add a growing underline for the active tab. */
-.folder-tab { position: relative; transition: background-color 180ms ease, color 180ms ease, transform 120ms var(--ease-out); overflow: hidden; }
+/* Tabs: color transition exists; active underline grows with a spring. */
+.folder-tab { position: relative; transition: background-color 160ms ease, color 160ms ease, transform 120ms var(--ease-out); overflow: hidden; }
 .folder-tab::after {
   content: ''; position: absolute; left: 10px; right: 10px; bottom: 0; height: 2px;
   border-radius: 2px; background: var(--brand);
   transform: scaleX(0); transform-origin: center;
-  transition: transform 200ms var(--ease-out);
+  transition: transform 240ms var(--ease-spring);
 }
 .folder-tab.active::after { transform: scaleX(1); }
 
 /* Toggles / checkboxes ease. */
 .check input, .select-box, .field.check input, label.check input {
-  transition: transform var(--dur-micro) var(--ease-out), accent-color var(--dur-micro) ease;
+  transition: transform var(--dur-micro) var(--ease-spring), accent-color var(--dur-micro) ease;
 }
-.member-row select, .member-actions select { transition: border-color var(--dur-micro) ease, background-color var(--dur-micro) ease; }
+.member-row select, .member-actions select { transition: border-color var(--dur-micro) ease, background-color var(--dur-micro) ease, transform var(--dur-micro) var(--ease-spring); }
 
 /* Skeleton loading (transform-free shimmer; respects reduced-motion below). */
 .skeleton-list { display: flex; flex-direction: column; gap: 10px; padding: 12px 0; }
@@ -1745,29 +1873,56 @@ button.chip:hover { filter: brightness(0.96); }
 .skeleton-row.mine { justify-content: flex-end; }
 .skeleton-bubble {
   width: min(62%, 320px); height: 52px; border-radius: 16px;
-  background: linear-gradient(100deg, var(--hover) 30%, var(--divider) 50%, var(--hover) 70%);
+  background: linear-gradient(100deg, var(--hover) 25%, var(--divider) 50%, var(--hover) 75%);
   background-size: 200% 100%;
-  animation: skeleton-shimmer 1.4s linear infinite;
+  animation: skeleton-shimmer 1.5s ease-in-out infinite;
 }
 .skeleton-avatar {
   width: 36px; height: 36px; border-radius: 50%; flex-shrink: 0;
-  background: linear-gradient(100deg, var(--hover) 30%, var(--divider) 50%, var(--hover) 70%);
+  background: linear-gradient(100deg, var(--hover) 25%, var(--divider) 50%, var(--hover) 75%);
   background-size: 200% 100%;
-  animation: skeleton-shimmer 1.4s linear infinite;
+  animation: skeleton-shimmer 1.5s ease-in-out infinite;
 }
 .loading-line { animation: empty-in var(--dur-overlay) ease-out; }
 
-/* Voice: icon crossfade on play/pause + already-smooth waveform. */
-.tg-playbtn svg { transition: transform var(--dur-micro) var(--ease-out), opacity var(--dur-micro) ease; }
-.tg-playbtn:not(:disabled):hover svg { transform: scale(1.08); }
+/* Voice: icon crossfade on play/pause, waveform warms when playing. */
+.tg-playbtn svg { transition: transform 180ms var(--ease-spring), opacity 150ms ease; }
+.tg-playbtn:not(:disabled):hover svg { transform: scale(1.1); }
+.voice-bars i { transition: opacity 180ms ease, transform 180ms ease, background-color 180ms ease; }
+.voice-bars.playing i.on { opacity: 1; }
 .voice-live i:not(.live-idle) { transition: height 120ms linear; }
+/* Recording dot + upload progress give instant feedback. */
+.voice-bar .voice-dot { animation: voice-pulse 1.1s ease-in-out infinite; }
+.progress-fill { transition: width 160ms linear; position: relative; }
+.progress-fill::after {
+  content: ''; position: absolute; inset: 0;
+  background: linear-gradient(100deg, transparent 20%, rgb(255 255 255 / 0.45) 50%, transparent 80%);
+  background-size: 200% 100%; animation: skeleton-shimmer 1.2s linear infinite;
+}
+/* Media hover: gentle lift, no glow. */
+.attachment-image img, .attachment-video, .tg-video { transition: transform 200ms var(--ease-out), filter 200ms ease; }
+.attachment-image:hover img { transform: scale(1.012); }
+.picker-row { transition: background-color 150ms ease, transform 150ms var(--ease-spring); }
+.picker-row:hover { transform: translateX(2px); }
+[dir='rtl'] .picker-row:hover { transform: translateX(-2px); }
+/* Focus rings ease in rather than snapping. */
+:focus-visible { transition: outline-color 150ms ease; }
+
+/* Search results cascade (capped). */
+.search-results .picker-row { animation: conv-in 180ms var(--ease-out) both; }
+.search-results .picker-row:nth-child(2) { animation-delay: 20ms; }
+.search-results .picker-row:nth-child(3) { animation-delay: 40ms; }
+.search-results .picker-row:nth-child(4) { animation-delay: 60ms; }
+.search-results .picker-row:nth-child(5) { animation-delay: 80ms; }
 
 @media (prefers-reduced-motion: reduce) {
-  .bubble-row.msg-new .bubble, .system-divider.msg-new, .chat-area,
+  .bubble-row.msg-new .bubble, .bubble-row.msg-stagger .bubble,
+  .system-divider.msg-new, .system-divider.msg-stagger, .chat-area,
+  .conversation-item.conv-enter,
   .details-panel, .thread-drawer, .context-menu, .bell-menu, .emoji-pop,
   .dialog, .viewer-image, .call-incoming, .call-overlay,
   .menu-backdrop, .dialog-backdrop, .viewer-backdrop,
-  .toast, .scroll-fab, .reaction-chip,
+  .toast, .scroll-fab, .reaction-chip, .unread-badge, .bell-badge,
   .reply-bar, .selection-bar, .pin-bar, .action-error, .call-error, .attach-bar, .voice-bar,
   .form-error, .empty-state, .empty-chats, .loading-line { animation: none; }
   .quick-emoji:hover { transform: none; }

@@ -131,11 +131,13 @@ export function ChatDetails({
   myUserId,
   onClose,
   onLeft,
+  leaving,
 }: {
   chat: Chat;
   myUserId: string | undefined;
   onClose: () => void;
   onLeft: () => void;
+  leaving?: boolean;
 }) {
   const queryClient = useQueryClient();
   const t = useT();
@@ -292,7 +294,10 @@ export function ChatDetails({
   const canInvite = admin || (chat.type === 'Group' && chat.membersCanInvite && chat.members.some((m) => m.userId === myUserId));
 
   return (
-    <aside className="details-panel" aria-label={t('details.panelLabel')}>
+    <aside
+      className={`details-panel${leaving ? ' leaving' : ''}`}
+      aria-label={t('details.panelLabel')}
+    >
       <div className="details-close">
         <button className="icon-btn" onClick={onClose} aria-label={t('details.closeDetails')}>
           <Icon name="close" />

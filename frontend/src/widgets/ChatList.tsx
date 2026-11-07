@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { chatApi } from '../features/chats/chatApi';
@@ -12,6 +12,7 @@ import { useUserQuery } from '../features/auth/useUser';
 import { Icon } from '../shared/ui/Icon';
 import { SearchInput } from '../shared/ui/SearchInput';
 import { NotificationBell } from './NotificationBell';
+import { useOverlayTransition } from '../shared/motion/useOverlayTransition';
 import { useT, useLocaleStore } from '../shared/i18n';
 
 export type FolderFilter =
@@ -66,6 +67,8 @@ function ConversationRow({
   onItemMenu,
   myUserId,
   isOnline,
+  stagger,
+  staggerIndex,
 }: {
   chat: Chat;
   active: boolean;
@@ -73,6 +76,8 @@ function ConversationRow({
   onItemMenu: (e: React.MouseEvent, chat: Chat) => void;
   myUserId: string | undefined;
   isOnline: (userId: string) => boolean;
+  stagger: boolean;
+  staggerIndex: number;
 }) {
   const t = useT();
   const name = chatDisplayName(c, myUserId);
@@ -85,7 +90,8 @@ function ConversationRow({
   const verified = c.type === 'Channel' && c.isPublic && c.username !== null;
   return (
     <button
-      className={`conversation-item${active ? ' active' : ''}`}
+      className={`conversation-item${active ? ' active' : ''}${stagger ? ' conv-enter' : ''}`}
+      style={stagger ? ({ '--stagger-i': Math.min(staggerIndex, 7) } as React.CSSProperties) : undefined}
       onClick={() => onSelect(c.id)}
       onContextMenu={(e) => onItemMenu(e, c)}
       aria-current={active}
@@ -114,7 +120,12 @@ function ConversationRow({
           <span className="conversation-preview" dir="auto">{c.lastMessagePreview ?? t('sidebar.noMessagesYet')}</span>
           <span className="conversation-meta">
             {c.unreadCount > 0 ? (
-              <span className={`unread-badge${c.isMuted ? ' muted' : ''}`}>{c.unreadCount}</span>
+              <span
+                key={c.unreadCount}
+                className={`unread-badge${c.isMuted ? ' muted' : ''}`}
+              >
+                {c.unreadCount}
+              </span>
             ) : null}
           </span>
         </span>
@@ -155,6 +166,18 @@ export function ChatList({
   const [menuOpen, setMenuOpen] = useState(false);
   const [promoVisible, setPromoVisible] = useState(promoVisibleInitial);
   const [itemMenu, setItemMenu] = useState<{ chat: Chat; x: number; y: number } | null>(null);
+  // Folder/search switches cascade the first rows (capped, 300ms window).
+  const [listStagger, setListStagger] = useState(true);
+  const itemMenuTransition = useOverlayTransition(itemMenu !== null, 150);
+  const profileMenuTransition = useOverlayTransition(menuOpen, 150);
+  const lastItemMenuRef = useRef(itemMenu);
+  if (itemMenu) lastItemMenuRef.current = itemMenu;
+  const renderItemMenu = itemMenu ?? lastItemMenuRef.current;
+  useEffect(() => {
+    setListStagger(true);
+    const timer = window.setTimeout(() => setListStagger(false), 350);
+    return () => window.clearTimeout(timer);
+  }, [filter, query]);
   const t = useT();
   const locale = useLocaleStore((s) => s.locale);
   const setLocale = useLocaleStore((s) => s.setLocale);
@@ -273,8 +296,11 @@ export function ChatList({
         >
           <UserAvatar avatarUrl={selfAvatarUrl} name={label} color="#8774e1" size={38} />
         </button>
-        {menuOpen ? (
-          <div className="profile-menu top" role="menu">
+        {profileMenuTransition.shouldRender ? (
+          <div
+            className={`profile-menu top${profileMenuTransition.leaving ? ' leaving' : ''}`}
+            role="menu"
+          >
             <button
               onClick={() => {
                 setMenuOpen(false);
@@ -434,7 +460,7 @@ export function ChatList({
             </div>
           </div>
         ) : null}
-        {visible.map((c) => (
+        {visible.map((c, index) => (
           <ConversationRow
             key={c.id}
             chat={c}
@@ -443,6 +469,8 @@ export function ChatList({
             onItemMenu={openItemMenu}
             myUserId={myUserId}
             isOnline={isOnline}
+            stagger={listStagger && index < 8}
+            staggerIndex={index}
           />
         ))}
       </div>
@@ -455,38 +483,41 @@ export function ChatList({
         <Icon name="edit" size={20} />
       </button>
 
-      {itemMenu ? (
-        <div className="menu-backdrop" onClick={() => setItemMenu(null)}>
+      {itemMenuTransition.shouldRender && renderItemMenu ? (
+        <div
+          className={`menu-backdrop${itemMenuTransition.leaving ? ' leaving' : ''}`}
+          onClick={() => setItemMenu(null)}
+        >
           <div
-            className="context-menu"
+            className={`context-menu${itemMenuTransition.leaving ? ' leaving' : ''}`}
             role="menu"
-            style={{ left: Math.min(itemMenu.x, window.innerWidth - 200), top: Math.min(itemMenu.y, window.innerHeight - 200) }}
+            style={{ left: Math.min(renderItemMenu.x, window.innerWidth - 200), top: Math.min(renderItemMenu.y, window.innerHeight - 200) }}
             onClick={(e) => e.stopPropagation()}
           >
             <button
               onClick={() => {
-                const chat = itemMenu.chat;
+                const chat = renderItemMenu.chat;
                 setItemMenu(null);
                 void chatApi.setArchived(chat.id, !chat.isArchived).then(() => refreshChats());
               }}
             >
               <Icon name="archive" size={16} />
-              {itemMenu.chat.isArchived ? t('sidebar.unarchive') : t('sidebar.archive')}
+              {renderItemMenu.chat.isArchived ? t('sidebar.unarchive') : t('sidebar.archive')}
             </button>
             <button
               onClick={() => {
-                const chat = itemMenu.chat;
+                const chat = renderItemMenu.chat;
                 setItemMenu(null);
                 void chatApi.setMuted(chat.id, !chat.isMuted).then(() => refreshChats());
               }}
             >
-              <Icon name={itemMenu.chat.isMuted ? 'bell' : 'mute'} size={16} />
-              {itemMenu.chat.isMuted ? t('chat.unmute') : t('chat.mute')}
+              <Icon name={renderItemMenu.chat.isMuted ? 'bell' : 'mute'} size={16} />
+              {renderItemMenu.chat.isMuted ? t('chat.unmute') : t('chat.mute')}
             </button>
-            {itemMenu.chat.seqCounter > 0 ? (
+            {renderItemMenu.chat.seqCounter > 0 ? (
               <button
                 onClick={() => {
-                  const chat = itemMenu.chat;
+                  const chat = renderItemMenu.chat;
                   setItemMenu(null);
                   void chatApi.markUnread(chat.id, chat.seqCounter).then(() => refreshChats());
                 }}

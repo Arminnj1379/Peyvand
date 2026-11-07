@@ -25,10 +25,12 @@ export function SearchDialog({
   myUserId,
   onOpenChat,
   onClose,
+  leaving,
 }: {
   myUserId: string | undefined;
   onOpenChat: (chatId: string) => void;
   onClose: () => void;
+  leaving?: boolean;
 }) {
   const [query, setQuery] = useState('');
   const [tab, setTab] = useState<Tab>('messages');
@@ -94,7 +96,11 @@ export function SearchDialog({
   }
 
   return (
-    <div className="dialog-backdrop" onClick={onClose} role="presentation">
+    <div
+      className={`dialog-backdrop${leaving ? ' leaving' : ''}`}
+      onClick={onClose}
+      role="presentation"
+    >
       <div
         className="dialog search-dialog"
         role="dialog"

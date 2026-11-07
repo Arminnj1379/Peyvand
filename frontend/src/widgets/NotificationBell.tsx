@@ -5,6 +5,7 @@ import { useSettingsStore } from '../features/settings/settingsStore';
 import { ApiError } from '../shared/api/client';
 import { Icon } from '../shared/ui/Icon';
 import { useEscape } from '../shared/ui/useEscape';
+import { useOverlayTransition } from '../shared/motion/useOverlayTransition';
 import { useT } from '../shared/i18n';
 
 /** Inbox bell: unread total badge + dropdown of unread conversations. */
@@ -21,6 +22,7 @@ export function NotificationBell({
   const [error, setError] = useState<string | null>(null);
   const notificationsEnabled = useSettingsStore((s) => s.notificationsEnabled);
   const wrapRef = useRef<HTMLDivElement | null>(null);
+  const bellTransition = useOverlayTransition(open, 150);
   const t = useT();
   useEscape(open, () => setOpen(false));
 
@@ -60,10 +62,18 @@ export function NotificationBell({
         onClick={() => setOpen((v) => !v)}
       >
         <Icon name="bell" />
-        {totalUnread > 0 ? <span className="bell-badge">{totalUnread > 99 ? '99+' : totalUnread}</span> : null}
+        {totalUnread > 0 ? (
+          <span key={totalUnread} className="bell-badge">
+            {totalUnread > 99 ? '99+' : totalUnread}
+          </span>
+        ) : null}
       </button>
-      {open ? (
-        <div className="bell-menu" role="menu" aria-label={t('notif.unreadConversations')}>
+      {bellTransition.shouldRender ? (
+        <div
+          className={`bell-menu${bellTransition.leaving ? ' leaving' : ''}`}
+          role="menu"
+          aria-label={t('notif.unreadConversations')}
+        >
           {!notificationsEnabled ? (
             <p className="hint bell-paused">{t('notif.paused')}</p>
           ) : null}

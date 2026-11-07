@@ -18,6 +18,7 @@ import { JoinChannelDialog } from '../widgets/JoinChannelDialog';
 import { NewChatDialog } from '../widgets/NewChatDialog';
 import { SearchDialog } from '../widgets/SearchDialog';
 import { EmptyState } from '../shared/ui/EmptyState';
+import { useOverlayTransition } from '../shared/motion/useOverlayTransition';
 import { useT } from '../shared/i18n';
 import { Toasts } from '../widgets/Toasts';
 import type { Toast } from '../widgets/Toasts';
@@ -177,6 +178,13 @@ export function MessengerPage() {
     setDetailsOpen(false);
   }, []);
 
+  // Overlay exits (AnimatePresence-lite): keep nodes mounted ~170ms so
+  // `.leaving` CSS exits play instead of snapping off.
+  const detailsTransition = useOverlayTransition(detailsOpen && active !== null, 180);
+  const newChatTransition = useOverlayTransition(newChatOpen, 170);
+  const joinTransition = useOverlayTransition(joinOpen, 170);
+  const searchTransition = useOverlayTransition(searchOpen, 170);
+
   function onResizePointerDown(e: React.PointerEvent): void {
     if (e.button !== 0) return;
     (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
@@ -299,10 +307,11 @@ export function MessengerPage() {
           />
         </main>
       )}
-      {detailsOpen && active ? (
+      {detailsTransition.shouldRender && active ? (
         <ChatDetails
           chat={active}
           myUserId={myUserId}
+          leaving={detailsTransition.leaving}
           onClose={() => setDetailsOpen(false)}
           onLeft={() => {
             setActiveId(null);
@@ -310,9 +319,10 @@ export function MessengerPage() {
           }}
         />
       ) : null}
-      {newChatOpen ? (
+      {newChatTransition.shouldRender ? (
         <NewChatDialog
           myUserId={myUserId}
+          leaving={newChatTransition.leaving}
           onClose={() => setNewChatOpen(false)}
           onCreated={(id) => {
             setNewChatOpen(false);
@@ -320,8 +330,9 @@ export function MessengerPage() {
           }}
         />
       ) : null}
-      {joinOpen ? (
+      {joinTransition.shouldRender ? (
         <JoinChannelDialog
+          leaving={joinTransition.leaving}
           onClose={() => setJoinOpen(false)}
           onJoined={(id) => {
             setJoinOpen(false);
@@ -329,8 +340,13 @@ export function MessengerPage() {
           }}
         />
       ) : null}
-      {searchOpen ? (
-        <SearchDialog myUserId={myUserId} onOpenChat={openChat} onClose={() => setSearchOpen(false)} />
+      {searchTransition.shouldRender ? (
+        <SearchDialog
+          myUserId={myUserId}
+          onOpenChat={openChat}
+          onClose={() => setSearchOpen(false)}
+          leaving={searchTransition.leaving}
+        />
       ) : null}
       <Toasts toasts={toasts} onOpen={openChat} onDismiss={dismissToast} />
       <CallOverlayMount chats={chats} myUserId={myUserId} />

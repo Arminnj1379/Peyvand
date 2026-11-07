@@ -1,4 +1,5 @@
-import { useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { RefObject } from 'react';
 import { useT } from '../shared/i18n';
 import { Icon } from '../shared/ui/Icon';
 
@@ -27,7 +28,9 @@ function prettyTitle(fileName: string): string {
   return noExt.replace(/[_+]+/g, ' ').trim() || base;
 }
 
-/** Deterministic pseudo-waveform so every voice message has its own shape. */
+/** Deterministic pseudo-waveform so every voice message has its own shape.
+ *  Smoothed neighbours + gentle mid-lift envelope keep the Telegram look:
+ *  tapered ends, lively middle, no uniform picket-fence bars. */
 function barsFor(seed: string, count = 44): number[] {
   let h = 2166136261;
   for (const c of seed) {
@@ -40,7 +43,15 @@ function barsFor(seed: string, count = 44): number[] {
     h ^= h >>> 16;
     return (h >>> 0) / 4294967296;
   };
-  return Array.from({ length: count }, () => 0.22 + rnd() * 0.78);
+  const raw = Array.from({ length: count }, () => rnd());
+  return raw.map((v, i) => {
+    const prev = raw[Math.max(0, i - 1)];
+    const next = raw[Math.min(count - 1, i + 1)];
+    const smooth = (prev + v * 2 + next) / 4;
+    const t = count <= 1 ? 0.5 : i / (count - 1);
+    const env = 0.45 + 0.55 * Math.sin(Math.PI * (0.08 + 0.84 * t));
+    return Math.min(1, Math.max(0.14, (0.18 + smooth * 0.82) * env + 0.08));
+  });
 }
 
 function seekFromPointer(
@@ -144,12 +155,85 @@ export function MusicPlayer({ url, fileName }: { url: string; fileName: string }
   );
 }
 
-/* ── Voice: round play button + waveform + duration (Telegram pill) ────── */
+/* ── Voice: round play button + waveform + duration (Telegram pill) ──────
+ *  Logic lives in VoicePlayer; bars are a pure presentational view so the
+ *  waveform can evolve without touching playback state. */
+
+function VoiceWaveformView({
+  bars,
+  playedCount,
+  playing,
+  barsRef,
+  duration,
+  time,
+  label,
+  onSeek,
+}: {
+  bars: number[];
+  playedCount: number;
+  playing: boolean;
+  barsRef: RefObject<HTMLSpanElement | null>;
+  duration: number;
+  time: number;
+  label: string;
+  onSeek: (ratio: number) => void;
+}) {
+  return (
+    <span
+      ref={barsRef}
+      className={`voice-bars${playing ? ' playing' : ''}`}
+      role="slider"
+      aria-label={label}
+      aria-valuemin={0}
+      aria-valuemax={Math.round(duration)}
+      aria-valuenow={Math.round(time)}
+      tabIndex={0}
+      onClick={(e) => seekFromPointer(e, barsRef.current, onSeek)}
+      onKeyDown={(e) => {
+        const el = barsRef.current;
+        const rtl = el ? getComputedStyle(el).direction === 'rtl' : false;
+        const fwdKey = rtl ? 'ArrowLeft' : 'ArrowRight';
+        const backKey = rtl ? 'ArrowRight' : 'ArrowLeft';
+        if (e.key === fwdKey || e.key === backKey || e.key === 'Home' || e.key === 'End') {
+          e.preventDefault();
+        } else {
+          return;
+        }
+        if (e.key === 'Home') onSeek(0);
+        else if (e.key === 'End') onSeek(1);
+        else if (e.key === fwdKey) onSeek(Math.min(1, (time + 5) / Math.max(1, duration)));
+        else onSeek(Math.max(0, (time - 5) / Math.max(1, duration)));
+      }}
+    >
+      {bars.map((h, i) => (
+        <i
+          key={i}
+          style={{ height: `${Math.round(h * 20) + 4}px` }}
+          className={i < playedCount ? 'on' : undefined}
+        />
+      ))}
+    </span>
+  );
+}
+
+// Memoized on playedCount (bar flip), not on the 60fps rAF clock: the parent
+// re-renders every frame for the time text while bars only change ~4/sec.
+const VoiceWaveform = memo(VoiceWaveformView, (p, n) => (
+  p.playedCount === n.playedCount
+  && p.playing === n.playing
+  && p.duration === n.duration
+  && p.bars === n.bars
+  && p.label === n.label
+  && p.onSeek === n.onSeek
+  && p.barsRef === n.barsRef
+  && Math.round(p.time) === Math.round(n.time)
+));
 
 export function VoicePlayer({ url, fileId }: { url: string; fileId: string }) {
   const t = useT();
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const barsRef = useRef<HTMLSpanElement | null>(null);
+  const rafRef = useRef<number>(0);
   const [playing, setPlaying] = useState(false);
   const [listened, setListened] = useState(false);
   const [time, setTime] = useState(0);
@@ -161,12 +245,43 @@ export function VoicePlayer({ url, fileId }: { url: string; fileId: string }) {
   const bars = useMemo(() => barsFor(fileId), [fileId]);
   const progress = duration > 0 ? Math.min(1, time / duration) : 0;
   const playedCount = Math.round(progress * bars.length);
+  // Single Telegram-style clock: duration at rest, elapsed once touched.
+  const displayTime = duration > 0 && !(playing || time > 0.05) ? duration : time;
+  // Telegram bubbles grow with length: short ≈188px, long caps at 264px.
+  const widthPx = duration > 0 ? Math.round(Math.min(264, 188 + Math.min(76, duration * 2.4))) : undefined;
+
+  // rAF-smooth clock while playing; onTimeUpdate stays as a fallback.
+  useEffect(() => {
+    if (!playing) return;
+    const tick = () => {
+      const a = audioRef.current;
+      if (a && Number.isFinite(a.currentTime)) setTime(a.currentTime);
+      rafRef.current = requestAnimationFrame(tick);
+    };
+    rafRef.current = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(rafRef.current);
+  }, [playing]);
+
+  const seekTo = useCallback((ratio: number): void => {
+    const audio = audioRef.current;
+    if (!audio || !Number.isFinite(audio.duration) || audio.duration <= 0) return;
+    audio.currentTime = Math.min(1, Math.max(0, ratio)) * audio.duration;
+  }, []);
 
   function toggle(): void {
     const audio = audioRef.current;
     if (!audio || failed) return;
     if (audio.paused) {
       pauseOtherPlayers(audio);
+      // After a natural end the element sits at duration: rewind for replay.
+      if (audio.ended || (Number.isFinite(audio.duration) && audio.currentTime >= audio.duration - 0.15)) {
+        try {
+          audio.currentTime = 0;
+        } catch {
+          // Non-seekable stream: replay from the start on next load.
+        }
+        setTime(0);
+      }
       setListened(true);
       void audio.play().catch(() => undefined);
     } else {
@@ -202,7 +317,7 @@ export function VoicePlayer({ url, fileId }: { url: string; fileId: string }) {
   }
 
   return (
-    <span className="voice-player">
+    <span className="voice-player" style={widthPx ? { width: `${widthPx}px` } : undefined}>
       <button
         type="button"
         className="tg-playbtn sm"
@@ -217,42 +332,19 @@ export function VoicePlayer({ url, fileId }: { url: string; fileId: string }) {
         )}
       </button>
       <span className="voice-main">
-        <span
-          ref={barsRef}
-          className="voice-bars"
-          role="slider"
-          aria-label={t('player.seekVoice')}
-          aria-valuemin={0}
-          aria-valuemax={Math.round(duration)}
-          aria-valuenow={Math.round(time)}
-          tabIndex={0}
-          onClick={(e) => seekFromPointer(e, barsRef.current, (r) => {
-            const audio = audioRef.current;
-            if (audio && Number.isFinite(audio.duration)) audio.currentTime = r * audio.duration;
-          })}
-          onKeyDown={(e) => {
-            const audio = audioRef.current;
-            if (!audio || !Number.isFinite(audio.duration)) return;
-            const rtl = barsRef.current
-              ? getComputedStyle(barsRef.current).direction === 'rtl'
-              : false;
-            const fwd = e.key === (rtl ? 'ArrowLeft' : 'ArrowRight');
-            const back = e.key === (rtl ? 'ArrowRight' : 'ArrowLeft');
-            if (fwd) audio.currentTime = Math.min(audio.duration, audio.currentTime + 5);
-            if (back) audio.currentTime = Math.max(0, audio.currentTime - 5);
-          }}
-        >
-          {bars.map((h, i) => (
-            <i
-              key={i}
-              style={{ height: `${Math.round(h * 22) + 4}px` }}
-              className={i < playedCount ? 'on' : undefined}
-            />
-          ))}
-        </span>
+        <VoiceWaveform
+          bars={bars}
+          playedCount={playedCount}
+          playing={playing}
+          barsRef={barsRef}
+          duration={duration}
+          time={time}
+          label={t('player.seekVoice')}
+          onSeek={seekTo}
+        />
         <span className="voice-time">
-          {formatMediaTime(time)} / {formatMediaTime(duration)}
-          {!listened ? <span className="voice-dot" aria-label={t('player.unplayed')} /> : null}
+          <span className="voice-time-text">{formatMediaTime(displayTime)}</span>
+          {!listened ? <span className="voice-unplayed" aria-label={t('player.unplayed')} /> : null}
         </span>
       </span>
       <audio
@@ -267,7 +359,15 @@ export function VoicePlayer({ url, fileId }: { url: string; fileId: string }) {
           setListened(true);
         }}
         onPause={() => setPlaying(false)}
-        onEnded={() => setPlaying(false)}
+        onEnded={(e) => {
+          setPlaying(false);
+          setTime(0);
+          try {
+            e.currentTarget.currentTime = 0;
+          } catch {
+            // Leave the element alone when the stream is not seekable.
+          }
+        }}
         onTimeUpdate={(e) => setTime(e.currentTarget.currentTime)}
         onWaiting={() => setLoading(true)}
         onPlaying={() => setLoading(false)}

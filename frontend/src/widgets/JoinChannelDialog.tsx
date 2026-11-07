@@ -10,9 +10,11 @@ import { useEscape } from '../shared/ui/useEscape';
 export function JoinChannelDialog({
   onClose,
   onJoined,
+  leaving,
 }: {
   onClose: () => void;
   onJoined: (chatId: string) => void;
+  leaving?: boolean;
 }) {
   const queryClient = useQueryClient();
   const t = useT();
@@ -75,7 +77,11 @@ export function JoinChannelDialog({
   }
 
   return (
-    <div className="dialog-backdrop" onClick={onClose} role="presentation">
+    <div
+      className={`dialog-backdrop${leaving ? ' leaving' : ''}`}
+      onClick={onClose}
+      role="presentation"
+    >
       <div
         className="dialog"
         role="dialog"

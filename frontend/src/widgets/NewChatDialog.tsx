@@ -18,10 +18,12 @@ export function NewChatDialog({
   myUserId,
   onClose,
   onCreated,
+  leaving,
 }: {
   myUserId: string | undefined;
   onClose: () => void;
   onCreated: (chatId: string) => void;
+  leaving?: boolean;
 }) {
   const queryClient = useQueryClient();
   const t = useT();
@@ -113,7 +115,11 @@ export function NewChatDialog({
   }
 
   return (
-    <div className="dialog-backdrop" onClick={onClose} role="presentation">
+    <div
+      className={`dialog-backdrop${leaving ? ' leaving' : ''}`}
+      onClick={onClose}
+      role="presentation"
+    >
       <div
         className="dialog"
         role="dialog"

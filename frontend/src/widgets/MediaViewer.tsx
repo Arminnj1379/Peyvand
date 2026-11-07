@@ -95,9 +95,11 @@ export function AttachmentView({
 export function MediaViewer({
   attachment,
   onClose,
+  leaving,
 }: {
   attachment: Attachment;
   onClose: () => void;
+  leaving?: boolean;
 }) {
   const url = useAttachmentUrl(attachment.fileId, attachment.kind);
   const t = useT();
@@ -111,7 +113,11 @@ export function MediaViewer({
   }, [onClose]);
 
   return (
-    <div className="viewer-backdrop" onClick={onClose} role="presentation">
+    <div
+      className={`viewer-backdrop${leaving ? ' leaving' : ''}`}
+      onClick={onClose}
+      role="presentation"
+    >
       <div
         className="viewer"
         role="dialog"

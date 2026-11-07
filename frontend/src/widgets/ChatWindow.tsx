@@ -20,6 +20,7 @@ import { useUserQuery } from '../features/auth/useUser';
 import { EmptyState } from '../shared/ui/EmptyState';
 import { Icon } from '../shared/ui/Icon';
 import { useEscape } from '../shared/ui/useEscape';
+import { useOverlayTransition } from '../shared/motion/useOverlayTransition';
 import { useT } from '../shared/i18n';
 import { AttachmentView, MediaViewer } from './MediaViewer';
 
@@ -153,7 +154,33 @@ export function ChatWindow({
   const prevLenRef = useRef(0);
   const lastAckedSeq = useRef(0);
   const typingTimer = useRef<number | null>(null);
+  // Initial-tail stagger: true for ~650ms after chat switch / first history paint.
+  // Live SignalR arrivals use `.msg-new` on the single newest node instead.
+  const [entering, setEntering] = useState(true);
   const t = useT();
+
+  // Exit-capable overlays (AnimatePresence-lite): keep the node ~150–180ms
+  // after close so the `.leaving` CSS exit can play.
+  const menuTransition = useOverlayTransition(menu !== null, 150);
+  const viewerTransition = useOverlayTransition(viewer !== null, 170);
+  const threadTransition = useOverlayTransition(threadParent !== null, 180);
+  const forwardTransition = useOverlayTransition(forwardMsg !== null || forwardMany !== null, 170);
+  const deleteTransition = useOverlayTransition(deleteTarget !== null, 170);
+  const bulkTransition = useOverlayTransition(bulkConfirm, 170);
+  const emojiTransition = useOverlayTransition(emojiOpen, 150);
+  // Stash last non-null payloads so exits render the same content while leaving.
+  const lastMenuRef = useRef(menu);
+  if (menu) lastMenuRef.current = menu;
+  const renderMenu = menu ?? lastMenuRef.current;
+  const lastViewerRef = useRef(viewer);
+  if (viewer) lastViewerRef.current = viewer;
+  const renderViewer = viewer ?? lastViewerRef.current;
+  const lastThreadRef = useRef(threadParent);
+  if (threadParent) lastThreadRef.current = threadParent;
+  const renderThread = threadParent ?? lastThreadRef.current;
+  const lastDeleteRef = useRef(deleteTarget);
+  if (deleteTarget) lastDeleteRef.current = deleteTarget;
+  const renderDelete = deleteTarget ?? lastDeleteRef.current;
 
   const forwardOpen = forwardMsg !== null || forwardMany !== null;
   useEscape(menu !== null, () => setMenu(null));
@@ -256,23 +283,41 @@ export function ChatWindow({
     });
     lastAckedSeq.current = 0;
     stickToBottom.current = true;
+    // Fresh chat → replay the capped tail stagger once history paints.
+    setEntering(true);
     // Scroll to bottom on chat change once data lands.
     requestAnimationFrame(() => {
       listRef.current?.scrollTo({ top: listRef.current.scrollHeight });
     });
   }, [chat.id]);
 
+  // Close the stagger window shortly after the first paint so live
+  // SignalR arrivals fall back to the single-node `.msg-new` animation.
+  useEffect(() => {
+    if (!entering) return;
+    if (flat.length === 0) return;
+    const timer = window.setTimeout(() => setEntering(false), 650);
+    return () => window.clearTimeout(timer);
+  }, [entering, flat.length, chat.id]);
+
   // Keep pinned to bottom when new messages arrive and the user is near the bottom.
+  // Single live arrivals glide (smooth); bulk history loads jump (instant) so the
+  // list never visibly shifts under the user's scroll position.
   useEffect(() => {
     const el = listRef.current;
+    const grown = flat.length - prevLenRef.current;
     if (!el || !stickToBottom.current) {
-      if (flat.length > prevLenRef.current) {
-        setBelowCount((c) => c + (flat.length - prevLenRef.current));
+      if (grown > 0) {
+        setBelowCount((c) => c + grown);
       }
       prevLenRef.current = flat.length;
       return;
     }
-    el.scrollTop = el.scrollHeight;
+    if (grown === 1 && prevLenRef.current > 0) {
+      el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
+    } else {
+      el.scrollTop = el.scrollHeight;
+    }
     prevLenRef.current = flat.length;
   }, [flat.length]);
 
@@ -858,6 +903,13 @@ export function ChatWindow({
           />
         ) : null}
         {flat.map((m, i) => {
+          const isLast = i === flat.length - 1;
+          // Capped tail stagger on chat open; live arrivals use `.msg-new` only.
+          const tailStart = Math.max(0, flat.length - 8);
+          const inTail = entering && i >= tailStart;
+          const staggerStyle = inTail
+            ? ({ '--stagger-i': i - tailStart } as React.CSSProperties)
+            : undefined;
           // Membership service messages render as a centered pill, not a bubble.
           if (m.kind === 'System') {
             const prev = flat[i - 1];
@@ -865,7 +917,11 @@ export function ChatWindow({
             return (
               <Fragment key={m.id}>
                 {showDay ? <div className="day-divider" role="separator" aria-label={formatDayLabel(m.createdAt)}>{formatDayLabel(m.createdAt)}</div> : null}
-                <div className={`system-divider${i === flat.length - 1 ? ' msg-new' : ''}`} role="note"><span dir="auto">{m.body}</span></div>
+                <div
+                  className={`system-divider${isLast && !entering ? ' msg-new' : ''}${inTail ? ' msg-stagger' : ''}`}
+                  style={staggerStyle}
+                  role="note"
+                ><span dir="auto">{m.body}</span></div>
               </Fragment>
             );
           }
@@ -925,7 +981,11 @@ export function ChatWindow({
           return (
             <Fragment key={m.id}>
               {showDay ? <div className="day-divider" role="separator" aria-label={formatDayLabel(m.createdAt)}>{formatDayLabel(m.createdAt)}</div> : null}
-              <div id={`msg-${m.id}`} className={`bubble-row${mine ? ' mine' : ' theirs'}${grouped ? ' grouped' : ''}${i === flat.length - 1 ? ' msg-new' : ''}`}>
+              <div
+                id={`msg-${m.id}`}
+                className={`bubble-row${mine ? ' mine' : ' theirs'}${grouped ? ' grouped' : ''}${isLast && !entering ? ' msg-new' : ''}${inTail ? ' msg-stagger' : ''}`}
+                style={staggerStyle}
+              >
                 {selecting ? (
                   <input
                     type="checkbox"
@@ -997,7 +1057,7 @@ export function ChatWindow({
                     <div className="reaction-row">
                       {m.reactions.map((r) => (
                         <button
-                          key={r.emoji}
+                          key={`${r.emoji}:${r.count}`}
                           className={`reaction-chip${r.mine ? ' mine' : ''}`}
                           onClick={() => void react(m, r.emoji)}
                           title={r.mine ? t('chat.removeReaction') : t('chat.reactToo')}
@@ -1048,12 +1108,14 @@ export function ChatWindow({
         })}
         {typingNames.length > 0 ? (
           <div className="typing-row">
-            <span className="typing-dots" aria-hidden="true">
-              <i />
-              <i />
-              <i />
+            <span className="typing-bubble">
+              <span className="typing-dots" aria-hidden="true">
+                <i />
+                <i />
+                <i />
+              </span>
+              {t('chat.typing')}
             </span>
-            {t('chat.typing')}
           </div>
         ) : null}
       </div>
@@ -1066,7 +1128,11 @@ export function ChatWindow({
           title={t('chat.scrollBottom')}
         >
           <Icon name="down" size={20} />
-          {belowCount > 0 ? <span className="scroll-count">{belowCount > 99 ? '99+' : belowCount}</span> : null}
+          {belowCount > 0 ? (
+            <span key={belowCount} className="scroll-count">
+              {belowCount > 99 ? '99+' : belowCount}
+            </span>
+          ) : null}
         </button>
       ) : null}
 
@@ -1298,8 +1364,12 @@ export function ChatWindow({
               <Icon name="mic" />
             </button>
           )}
-          {emojiOpen ? (
-            <div className="emoji-pop" role="dialog" aria-label={t('chat.insertEmoji')}>
+          {emojiTransition.shouldRender ? (
+            <div
+              className={`emoji-pop${emojiTransition.leaving ? ' leaving' : ''}`}
+              role="dialog"
+              aria-label={t('chat.insertEmoji')}
+            >
               {[...QUICK_EMOJIS, ...MORE_EMOJIS].map((e) => (
                 <button
                   key={e}
@@ -1322,17 +1392,26 @@ export function ChatWindow({
       )}
       </div>
 
-      {viewer ? <MediaViewer attachment={viewer} onClose={() => setViewer(null)} /> : null}
+      {viewerTransition.shouldRender && renderViewer ? (
+        <MediaViewer
+          attachment={renderViewer}
+          onClose={() => setViewer(null)}
+          leaving={viewerTransition.leaving}
+        />
+      ) : null}
 
-      {menu ? (
-        <div className="menu-backdrop" onClick={() => setMenu(null)}>
+      {menuTransition.shouldRender && renderMenu ? (
+        <div
+          className={`menu-backdrop${menuTransition.leaving ? ' leaving' : ''}`}
+          onClick={() => setMenu(null)}
+        >
           <div
-            className="context-menu wide"
+            className={`context-menu wide${menuTransition.leaving ? ' leaving' : ''}`}
             role="menu"
-            style={{ left: Math.min(menu.x, window.innerWidth - 220), top: Math.min(menu.y, window.innerHeight - 340) }}
+            style={{ left: Math.min(renderMenu.x, window.innerWidth - 220), top: Math.min(renderMenu.y, window.innerHeight - 340) }}
             onClick={(e) => e.stopPropagation()}
           >
-            {!menu.msg.isDeleted ? (
+            {!renderMenu.msg.isDeleted ? (
               <div className="quick-react" role="group" aria-label={t('chat.quickReactions')}>
                 {QUICK_EMOJIS.map((e) => (
                   <button
@@ -1340,8 +1419,9 @@ export function ChatWindow({
                     className="quick-emoji"
                     aria-label={t('chat.reactWith', { emoji: e })}
                     onClick={() => {
+                      const target = renderMenu.msg;
                       setMenu(null);
-                      void react(menu.msg, e);
+                      void react(target, e);
                     }}
                   >
                     {e}
@@ -1349,7 +1429,7 @@ export function ChatWindow({
                 ))}
               </div>
             ) : null}
-            {!menu.msg.isDeleted ? (
+            {!renderMenu.msg.isDeleted ? (
               <div className="quick-react more" role="group" aria-label={t('chat.moreReactions')}>
                 {MORE_EMOJIS.map((e) => (
                   <button
@@ -1357,8 +1437,9 @@ export function ChatWindow({
                     className="quick-emoji"
                     aria-label={t('chat.reactWith', { emoji: e })}
                     onClick={() => {
+                      const target = renderMenu.msg;
                       setMenu(null);
-                      void react(menu.msg, e);
+                      void react(target, e);
                     }}
                   >
                     {e}
@@ -1368,18 +1449,19 @@ export function ChatWindow({
             ) : null}
             <button
               onClick={() => {
-                setReplyTo(menu.msg);
+                setReplyTo(renderMenu.msg);
                 setMenu(null);
               }}
-              disabled={menu.msg.isDeleted}
+              disabled={renderMenu.msg.isDeleted}
             >
               <Icon name="reply" size={16} />
               {t('chat.reply')}
             </button>
-            {menu.msg.replyCount > 0 || menu.msg.replyTo ? (
+            {renderMenu.msg.replyCount > 0 || renderMenu.msg.replyTo ? (
               <button
                 onClick={() => {
-                  const parent = menu.msg.replyTo ? (byId.get(menu.msg.replyTo.messageId) ?? menu.msg) : menu.msg;
+                  const source = renderMenu.msg;
+                  const parent = source.replyTo ? (byId.get(source.replyTo.messageId) ?? source) : source;
                   setThreadParent(parent);
                   setMenu(null);
                 }}
@@ -1390,17 +1472,17 @@ export function ChatWindow({
             ) : null}
             <button
               onClick={() => {
-                setForwardMsg(menu.msg);
+                setForwardMsg(renderMenu.msg);
                 setMenu(null);
               }}
-              disabled={menu.msg.isDeleted}
+              disabled={renderMenu.msg.isDeleted}
             >
               <Icon name="forward" size={16} />
               {t('chat.forward')}
             </button>
             <button
               onClick={() => {
-                toggleSelect(menu.msg.id);
+                toggleSelect(renderMenu.msg.id);
                 setMenu(null);
               }}
             >
@@ -1409,19 +1491,19 @@ export function ChatWindow({
             </button>
             <button
               onClick={() => {
-                void navigator.clipboard?.writeText(menu.msg.body).catch(() => undefined);
+                void navigator.clipboard?.writeText(renderMenu.msg.body).catch(() => undefined);
                 setMenu(null);
               }}
-              disabled={menu.msg.isDeleted}
+              disabled={renderMenu.msg.isDeleted}
             >
               <Icon name="copy" size={16} />
               {t('chat.copy')}
             </button>
-            {menu.msg.senderId === myUserId && !menu.msg.isDeleted ? (
+            {renderMenu.msg.senderId === myUserId && !renderMenu.msg.isDeleted ? (
               <button
                 onClick={() => {
-                  setEditing(menu.msg);
-                  setDraft(menu.msg.body);
+                  setEditing(renderMenu.msg);
+                  setDraft(renderMenu.msg.body);
                   setMenu(null);
                 }}
               >
@@ -1429,11 +1511,11 @@ export function ChatWindow({
                 {t('chat.edit')}
               </button>
             ) : null}
-            {!menu.msg.isDeleted && (menu.msg.senderId === myUserId || isAdmin) ? (
+            {!renderMenu.msg.isDeleted && (renderMenu.msg.senderId === myUserId || isAdmin) ? (
               <button
                 className="danger"
                 onClick={() => {
-                  setDeleteTarget(menu.msg);
+                  setDeleteTarget(renderMenu.msg);
                   setMenu(null);
                 }}
               >
@@ -1441,18 +1523,18 @@ export function ChatWindow({
                 {t('chat.deleteMenu')}
               </button>
             ) : null}
-            {(isAdmin || chat.type === 'Dm') && !menu.msg.isDeleted ? (
-              <button onClick={() => void togglePin(menu.msg)}>
+            {(isAdmin || chat.type === 'Dm') && !renderMenu.msg.isDeleted ? (
+              <button onClick={() => void togglePin(renderMenu.msg)}>
                 <Icon name="pin" size={16} />
-                {chat.pinnedMessageIds.includes(menu.msg.id) ? t('chat.unpin') : t('chat.pin')}
+                {chat.pinnedMessageIds.includes(renderMenu.msg.id) ? t('chat.unpin') : t('chat.pin')}
               </button>
             ) : null}
-            {menu.msg.seq > 0 ? (
+            {renderMenu.msg.seq > 0 ? (
               <>
                 <div className="menu-sep" aria-hidden="true" />
                 <button
                   onClick={() => {
-                    const seq = menu.msg.seq;
+                    const seq = renderMenu.msg.seq;
                     setMenu(null);
                     void chatApi.markUnread(chat.id, seq)
                       .then(() => queryClient.invalidateQueries({ queryKey: ['chats'] }))
@@ -1468,8 +1550,12 @@ export function ChatWindow({
         </div>
       ) : null}
 
-      {forwardPickerItems ? (
-        <div className="dialog-backdrop" onClick={() => { setForwardMsg(null); setForwardMany(null); setForwardError(null); }} role="presentation">
+      {forwardTransition.shouldRender && forwardPickerItems ? (
+        <div
+          className={`dialog-backdrop${forwardTransition.leaving ? ' leaving' : ''}`}
+          onClick={() => { setForwardMsg(null); setForwardMany(null); setForwardError(null); }}
+          role="presentation"
+        >
           <div className="dialog" role="dialog" aria-modal="true" aria-label={t('chat.forwardTitle')} onClick={(e) => e.stopPropagation()}>
             <h2>{forwardPickerItems.length > 1 ? t('chat.forwardManyTo', { count: forwardPickerItems.length }) : t('chat.forwardOneTo')}</h2>
             <p className="hint">
@@ -1503,12 +1589,16 @@ export function ChatWindow({
         </div>
       ) : null}
 
-      {deleteTarget ? (
-        <div className="dialog-backdrop" onClick={() => { if (!deleting) setDeleteTarget(null); }} role="presentation">
+      {deleteTransition.shouldRender && renderDelete ? (
+        <div
+          className={`dialog-backdrop${deleteTransition.leaving ? ' leaving' : ''}`}
+          onClick={() => { if (!deleting) setDeleteTarget(null); }}
+          role="presentation"
+        >
           <div className="dialog" role="dialog" aria-modal="true" aria-label={t('chat.deleteTitle')} onClick={(e) => e.stopPropagation()}>
             <h2>{t('chat.deleteHeading')}</h2>
             <p className="hint">
-              “{deleteTarget.body.slice(0, 120) || deleteTarget.attachment?.fileName || t('chat.attachment')}”
+              “{renderDelete.body.slice(0, 120) || renderDelete.attachment?.fileName || t('chat.attachment')}”
             </p>
             <p className="hint">
               {t('chat.deleteHint1')} <strong>{t('chat.deleteHintStrong')}</strong>{' '}
@@ -1530,8 +1620,12 @@ export function ChatWindow({
         </div>
       ) : null}
 
-      {bulkConfirm ? (
-        <div className="dialog-backdrop" onClick={() => { if (!bulkDeleting) setBulkConfirm(false); }} role="presentation">
+      {bulkTransition.shouldRender ? (
+        <div
+          className={`dialog-backdrop${bulkTransition.leaving ? ' leaving' : ''}`}
+          onClick={() => { if (!bulkDeleting) setBulkConfirm(false); }}
+          role="presentation"
+        >
           <div className="dialog" role="dialog" aria-modal="true" aria-label={t('chat.bulkDeleteTitle')} onClick={(e) => e.stopPropagation()}>
             <h2>{selected.size === 1 ? t('chat.bulkDeleteOne') : t('chat.bulkDeleteMany', { count: selected.size })}</h2>
             <p className="hint">
@@ -1554,15 +1648,18 @@ export function ChatWindow({
         </div>
       ) : null}
 
-      {threadParent ? (
-        <aside className="thread-drawer" aria-label={t('chat.threadLabel')}>
+      {threadTransition.shouldRender && renderThread ? (
+        <aside
+          className={`thread-drawer${threadTransition.leaving ? ' leaving' : ''}`}
+          aria-label={t('chat.threadLabel')}
+        >
           <header className="thread-head">
             <strong>{t('chat.thread')}</strong>
             <button className="icon-btn" aria-label={t('chat.closeThread')} onClick={() => setThreadParent(null)}>
               <Icon name="close" size={16} />
             </button>
           </header>
-          <div className="thread-parent">{threadParent.isDeleted ? t('chat.messageDeleted') : threadParent.body.slice(0, 200)}</div>
+          <div className="thread-parent">{renderThread.isDeleted ? t('chat.messageDeleted') : renderThread.body.slice(0, 200)}</div>
           <div className="thread-list">
             {threadQuery.isPending ? <p className="hint">{t('chat.loadingReplies')}</p> : null}
             {(threadQuery.data ?? []).map((r) => (
@@ -1580,7 +1677,7 @@ export function ChatWindow({
             <button
               className="ghost-btn inline"
               onClick={() => {
-                setReplyTo(threadParent);
+                setReplyTo(renderThread);
                 setThreadParent(null);
               }}
             >
