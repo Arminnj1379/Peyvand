@@ -530,7 +530,9 @@ button.chat-peer-btn:hover { background: var(--hover); }
 
 .message-list {
   position: relative; flex: 1; overflow-y: auto; overflow-x: hidden;
-  padding: 16px max(16px, calc((100% - 760px) / 2)) 12px;
+  /* Full-bleed conversation column (Telegram Web): bubbles align to the
+     panel edges instead of a centered 760px column. */
+  padding: 16px 24px 12px;
   display: flex; flex-direction: column; gap: 4px;
   overscroll-behavior: contain;
   min-height: 0;
@@ -544,6 +546,9 @@ button.chat-peer-btn:hover { background: var(--hover); }
   background-attachment: local, local;
 }
 .message-list.dragging { outline: 2px dashed var(--brand); outline-offset: -2px; }
+@media (min-width: 1600px) {
+  .message-list { padding-inline: 40px; }
+}
 
 .day-divider {
   position: sticky; top: 8px; z-index: 3;
@@ -574,6 +579,12 @@ button.chat-peer-btn:hover { background: var(--hover); }
 
 .bubble-row { display: flex; }
 .bubble-row.mine { justify-content: flex-end; }
+.bubble-row.theirs { justify-content: flex-start; }
+/* Bubble sides are physical, not directional: sent stays right and
+   received stays left in both LTR and RTL locales (flex-start/end flip
+   with document direction, so pin the RTL case explicitly). */
+[dir='rtl'] .bubble-row.mine { justify-content: flex-start; }
+[dir='rtl'] .bubble-row.theirs { justify-content: flex-end; }
 /* Grouped: consecutive simple messages from one sender collapse together (2–3px). */
 .bubble-row.grouped { margin-top: -1px; }
 .bubble-row:not(.grouped) { margin-top: 8px; }
@@ -581,7 +592,8 @@ button.chat-peer-btn:hover { background: var(--hover); }
 
 .bubble {
   position: relative;
-  max-width: min(480px, 78%);
+  /* ~70% of the chat width on laptop/FHD; px cap keeps QHD lines readable. */
+  max-width: min(1000px, 70%);
   padding: 7px 11px 7px;
   border-radius: 16px;
   background: var(--bubble-in);
@@ -593,9 +605,6 @@ button.chat-peer-btn:hover { background: var(--hover); }
 }
 :root[data-theme='dark'] .bubble,
 :root:not([data-theme='light']) .bubble { border-color: transparent; }
-@media (min-width: 1600px) {
-  .bubble { max-width: min(560px, 65%); }
-}
 .bubble-row.mine .bubble { background: var(--bubble-out); border-bottom-right-radius: 6px; }
 :root[data-theme='dark'] .bubble-row.mine .bubble,
 :root:not([data-theme='light']) .bubble-row.mine .bubble { color: #fff; }
